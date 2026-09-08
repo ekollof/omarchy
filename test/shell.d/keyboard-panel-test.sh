@@ -21,4 +21,8 @@ assert(
     /focusPrimed \? WlrKeyboardFocus\.OnDemand : WlrKeyboardFocus\.Exclusive/.test(panelQml),
   'bar panels settle on OnDemand keyboard focus so pointer input can reach an OSK'
 )
+assert(
+  /originX = barPos === "left" \? Math\.min\(missingW, barW\)/.test(panelQml) && /originY = barPos === "top" \? Math\.min\(missingH, barH\)/.test(panelQml) && !/root\.x/.test(panelQml) && !/root\.y/.test(panelQml),
+  'panel cards are positioned in the inset overlay via the window origin derived from the mapped surface, not phantom root.x/root.y'
+)
 JS
