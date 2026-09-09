@@ -114,6 +114,14 @@ grep -q 'AUTOLOGIN: "N"' "$COMPOSE" || fail "console autologin not disabled for 
 grep -q 'USERNAME: "admin@corp.example.com"' "$COMPOSE" || fail "join account not emitted"
 pass "domain join compose emits DOMAIN, DOMAIN_OU, and AUTOLOGIN"
 
+# Periods are legal in domain account names (john.doe) and need no escaping.
+reset_case
+prepare_user_mount_sources
+write_domain 4G 2 64G 'john.doe@cs.local' pw UTC cs.local '' N
+grep -q 'USERNAME: "john.doe@cs.local"' "$COMPOSE" || fail "dotted join account not emitted"
+grep -q 'DOMAIN: "cs.local"' "$COMPOSE" || fail "two-label domain not emitted"
+pass "a dotted join account is emitted verbatim"
+
 reset_case
 prepare_user_mount_sources
 write_domain 4G 2 64G jdoe pw UTC corp.example.com '' N

@@ -158,7 +158,14 @@ with_vm_lock() {
 valid_ram() { [[ $1 =~ ^[0-9]{1,3}G$ ]]; }
 valid_cores() { [[ $1 =~ ^[0-9]{1,2}$ ]] && ((10#$1 >= 1)); }
 valid_disk() { [[ $1 =~ ^[0-9]{1,4}G$ ]]; }
-valid_username() { [[ $1 =~ ^[A-Za-z0-9_-]{1,20}$ ]]; }
+# Windows allows periods inside account names (john.doe), but not a trailing
+# one, and never a name made only of periods. The 20-character cap is what
+# Windows itself enforces for local accounts and sAMAccountNames.
+valid_username() {
+  [[ $1 =~ ^[A-Za-z0-9_.-]{1,20}$ ]] || return 1
+  [[ $1 != *"." ]] || return 1
+  ! [[ $1 =~ ^\.+$ ]]
+}
 valid_tz() { [[ $1 =~ ^[A-Za-z0-9_/.+-]{1,64}$ ]]; }
 valid_password() { [[ $1 =~ ^[[:print:]]{1,64}$ ]]; }
 
@@ -181,13 +188,17 @@ valid_ou() {
 
 # A domain join account: a bare sAMAccountName or a UPN (user@domain). The
 # backslash form is deliberately rejected -- unattended setup stores the domain
-# separately from the credential username, matching dockur's own check.
+# separately from the credential username, matching dockur's own check. A UPN
+# user part is a domain account, which Windows caps at 256 characters rather
+# than the 20-character sAMAccountName limit.
 valid_join_account() {
-  local account="$1" qualifier=""
+  local account="$1" qualifier="" re='^[A-Za-z0-9_.-]{1,256}$'
   if [[ $1 == *@* ]]; then
     account="${1%%@*}"
     qualifier="${1#*@}"
     valid_domain "$qualifier" || return 1
+    [[ $account =~ $re && $account != *"." ]] || return 1
+    return 0
   fi
   valid_username "$account"
 }
@@ -202,10 +213,9 @@ valid_rdp_username() {
     valid_join_account "$1"
     ;;
   *\\*)
-    [[ $1 == *\\* ]] || return 1
     local domain="${1%%\\*}" user="${1#*\\}"
     [[ -n $domain && -n $user ]] || return 1
-    [[ $user =~ ^[A-Za-z0-9_-]{1,20}$ && $domain =~ $re ]]
+    valid_username "$user" && [[ $domain =~ $re ]]
     ;;
   *)
     valid_username "$1"
@@ -1620,7 +1630,7 @@ EOF
       USERNAME="docker"
     fi
     if ! valid_username "$USERNAME"; then
-      echo "Invalid username (use letters, digits, - or _, up to 20 chars). Using default: docker"
+      echo "Invalid username (letters, digits, . - or _, up to 20 chars, no trailing dot). Using default: docker"
       USERNAME="docker"
     fi
 
