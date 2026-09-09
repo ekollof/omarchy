@@ -1761,7 +1761,9 @@ EOF
   # grant can be applied later by removing the well-known group member.
   GUEST_COMMAND=""
   if [[ -n $DOMAIN ]]; then
-    GUEST_COMMAND="powershell -NoProfile -Command \"Add-LocalGroupMember -Group 'Remote Desktop Users' -Member ([System.Security.Principal.SecurityIdentifier]'S-1-5-11')\""
+    # Add-LocalGroupMember binds names, not SecurityIdentifier objects or SID
+    # strings (observed on Windows 11 24H2), so pass the well-known name.
+    GUEST_COMMAND="powershell -NoProfile -Command \"Add-LocalGroupMember -Group 'Remote Desktop Users' -Member 'NT AUTHORITY\\Authenticated Users'\""
   fi
 
   # Write the root-owned compose from the validated settings (one prompt if
