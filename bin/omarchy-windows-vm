@@ -1379,6 +1379,11 @@ write_krb5_conf() {
     printf '  default_realm = %s\n' "$realm"
     printf '  dns_lookup_kdc = true\n'
     printf '  dns_lookup_realm = false\n'
+    # Modern MIT krb5 validates that an AS reply echoes the requested client
+    # name; AD canonicalizes UPNs to the account form, so ask for
+    # canonicalization or the reply is discarded ("KDC reply did not match
+    # expectations") even though the password was accepted.
+    printf '  canonicalize = true\n'
     # AD deployments do not publish PTR records for every DC; without this,
     # MIT krb5 can refuse a KDC whose reverse lookup does not round-trip.
     printf '  rdns = false\n'
@@ -1891,7 +1896,18 @@ To stop: omarchy-windows-vm stop"
   # If scale is less than 130%, don't set any scale (use default 100)
 
   # Connect with RDP in fullscreen (auto-detects resolution)
-  xfreerdp3 /u:"$WIN_USER" /p:"$WIN_PASS" /v:127.0.0.1:3389 -grab-keyboard /sound /microphone /clipboard /cert:ignore /title:"Windows VM - Omarchy" /dynamic-resolution /gfx:AVC444 /floatbar:sticky:off,default:visible,show:fullscreen $RDP_SCALE
+  # Domain-joined guests log on inside the session over a TLS transport
+  # (/sec:tls) instead of NLA: CredSSP must validate the logon against the
+  # domain controller, and on a high-latency path (relayed VPN) the client's
+  # transport read budget expires before the guest answers, killing the
+  # connection. A TLS transport carries no pre-logon exchange; the Windows
+  # logon screen appears inside the session and waits however long it takes.
+  if [[ -n $WIN_DOMAIN ]]; then
+    RDP_SEC="/sec:tls"
+  else
+    RDP_SEC="/sec:nla"
+  fi
+  xfreerdp3 /u:"$WIN_USER" /p:"$WIN_PASS" /v:127.0.0.1:3389 $RDP_SEC -grab-keyboard /sound /microphone /clipboard /cert:ignore /title:"Windows VM - Omarchy" /dynamic-resolution /gfx:AVC444 /floatbar:sticky:off,default:visible,show:fullscreen $RDP_SCALE
 
   # After RDP closes, stop the container unless --keep-alive was specified
   if [[ $KEEP_ALIVE = "false" ]]; then
