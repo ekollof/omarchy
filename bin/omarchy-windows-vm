@@ -1325,16 +1325,18 @@ unescape() {
 
 # Store the RDP credentials privately for the user (0600) so the plaintext
 # password is not world-readable. The password is one validated printable line
-# (no newline), so plain KEY=VALUE is safe.
+# (no newline), so plain KEY=VALUE is safe. The optional domain records what
+# launch needs for its Kerberos config without depending on the root-owned
+# compose being readable.
 write_credentials() {
-  local username="$1" password="$2" old_umask dir tmp
+  local username="$1" password="$2" domain="${3:-}" old_umask dir tmp
   dir=$(dirname -- "$CREDENTIALS_FILE")
   mkdir -p "$dir" || return 1
   chmod_private_dir "$dir" || return 1
   old_umask=$(umask)
   umask 077
   tmp=$(mktemp "$dir/.credentials.XXXXXX") || { umask "$old_umask"; return 1; }
-  if ! printf 'USERNAME=%s\nPASSWORD=%s\n' "$username" "$password" >"$tmp" ||
+  if ! printf 'USERNAME=%s\nPASSWORD=%s\nDOMAIN=%s\n' "$username" "$password" "$domain" >"$tmp" ||
     ! chmod 0600 "$tmp" || ! mv -fT -- "$tmp" "$CREDENTIALS_FILE"; then
     rm -f -- "$tmp"
     umask "$old_umask"
@@ -1355,6 +1357,37 @@ read_credential() {
     }
   done <"$CREDENTIALS_FILE"
   return 1
+}
+
+# Build the Kerberos config FreeRDP is pointed at through KRB5_CONFIG. FreeRDP
+# 3 tries Kerberos before NTLM for NLA. A local account has no realm, so a
+# realm-less config falls straight through to NTLM; a domain-joined VM must
+# instead locate its domain controllers, which MIT krb5 does over DNS SRV
+# records once dns_lookup_kdc is on -- the same discovery a Windows client
+# performs. Rewritten on every launch so it always matches the VM's domain
+# state (and never the /etc/krb5.conf MIT sample that ships with krb5).
+write_krb5_conf() {
+  local file="$1" domain="$2" realm=""
+  mkdir -p "$(dirname -- "$file")"
+  if [[ -z $domain ]]; then
+    printf '[libdefaults]\n  dns_lookup_kdc = false\n  dns_lookup_realm = false\n' >"$file"
+    return 0
+  fi
+  realm=$(printf '%s' "$domain" | tr '[:lower:]' '[:upper:]')
+  {
+    printf '[libdefaults]\n'
+    printf '  default_realm = %s\n' "$realm"
+    printf '  dns_lookup_kdc = true\n'
+    printf '  dns_lookup_realm = false\n'
+    # AD deployments do not publish PTR records for every DC; without this,
+    # MIT krb5 can refuse a KDC whose reverse lookup does not round-trip.
+    printf '  rdns = false\n'
+    # Kerberos over UDP times out behind some firewalls; 0 forces TCP.
+    printf '  udp_preference_limit = 0\n'
+    printf '\n[domain_realm]\n'
+    printf '  .%s = %s\n' "$domain" "$realm"
+    printf '  %s = %s\n' "$domain" "$realm"
+  } >"$file"
 }
 
 read_compose_value() {
@@ -1382,7 +1415,7 @@ migrate_legacy_compose() {
     echo "Could not validate the existing Windows VM data directories." >&2
     return 1
   }
-  write_credentials "$username" "$password" || return 1
+  write_credentials "$username" "$password" "" || return 1
   # The elevated writer derives both mount anchors from the authenticated uid;
   # it never consumes volume paths from this user-owned legacy file. Legacy
   # composes predate domain support, so no join settings are carried over.
@@ -1704,7 +1737,7 @@ EOF
     echo "❌ Failed to write the Windows VM configuration."
     exit 1
   }
-  write_credentials "$RDP_USER" "$RDP_PASS" || {
+  write_credentials "$RDP_USER" "$RDP_PASS" "$DOMAIN" || {
     echo "❌ Failed to store private RDP credentials." >&2
     exit 1
   }
@@ -1826,14 +1859,23 @@ To stop: omarchy-windows-vm stop"
   # FreeRDP 3 tries Kerberos before NTLM for NLA, and krb5 ships /etc/krb5.conf
   # as the MIT sample with default_realm = ATHENA.MIT.EDU. Every connect then
   # goes looking for MIT's KDC: with internet up it fails fast, but off the
-  # network each attempt blocks ~23s and no RDP window is ever drawn. The VM
-  # authenticates against a local Windows account, so point FreeRDP at a
-  # realm-less config and let it fall straight through to NTLM.
-  KRB5_CONF="$HOME/.config/windows/krb5.conf"
-  mkdir -p "$(dirname "$KRB5_CONF")"
-  if [[ ! -f $KRB5_CONF ]]; then
-    printf '[libdefaults]\n  dns_lookup_kdc = false\n  dns_lookup_realm = false\n' >"$KRB5_CONF"
+  # network each attempt blocks ~23s and no RDP window is ever drawn. The
+  # config below is realm-less for a local account (fall straight through to
+  # NTLM) and maps the AD realm for a domain-joined VM so the KDC is found
+  # over DNS SRV records. The domain comes from the private credentials file,
+  # falling back to the compose only when that is readable (sudoless mode).
+  # Credentials written before the domain line existed are covered by a UPN
+  # login, which names its own realm.
+  WIN_DOMAIN=$(read_credential DOMAIN 2>/dev/null) || WIN_DOMAIN=""
+  if [[ -z $WIN_DOMAIN && -r $COMPOSE_FILE ]]; then
+    WIN_DOMAIN=$(read_compose_value DOMAIN "$COMPOSE_FILE")
   fi
+  if [[ -z $WIN_DOMAIN ]]; then
+    local_win_user=$(read_credential USERNAME 2>/dev/null) || local_win_user=""
+    [[ $local_win_user == *@* ]] && WIN_DOMAIN="${local_win_user##*@}"
+  fi
+  KRB5_CONF="$HOME/.config/windows/krb5.conf"
+  write_krb5_conf "$KRB5_CONF" "$WIN_DOMAIN"
   export KRB5_CONFIG="$KRB5_CONF"
 
   # Detect display scale from Hyprland
@@ -1965,7 +2007,11 @@ update_credentials() {
     exit 1
   fi
 
-  write_credentials "$username" "$password" || {
+  # The VM's domain state does not change here; carry it into the rewritten
+  # credentials so the launcher's Kerberos config stays correct.
+  local existing_domain
+  existing_domain=$(read_credential DOMAIN 2>/dev/null) || existing_domain=""
+  write_credentials "$username" "$password" "$existing_domain" || {
     echo "❌ Failed to store private RDP credentials." >&2
     exit 1
   }

@@ -204,3 +204,46 @@ pass "elevation refuses a mismatched privileged copy and accepts an identical on
   valid_rdp_username 'alice' || fail "valid_rdp_username rejected a bare name"
 )
 pass "domain, OU, join account, and RDP username validation is strict"
+
+# The Kerberos config handed to FreeRDP follows the VM's domain state: a
+# realm-less stub for local accounts (NTLM straight through), and a
+# DNS-discovering realm for a domain join.
+(
+  test_home=$(mktemp -d)
+  trap 'rm -rf "$test_home"' EXIT
+  set -- help
+  source "$windows_vm_command" >/dev/null
+  conf="$test_home/windows/krb5.conf"
+
+  write_krb5_conf "$conf" "" || fail "write_krb5_conf failed without a domain"
+  grep -q 'dns_lookup_kdc = false' "$conf" || fail "local krb5 config must not look for a KDC"
+  grep -q 'default_realm' "$conf" && fail "local krb5 config must not set a realm"
+
+  write_krb5_conf "$conf" "cs.local" || fail "write_krb5_conf failed with a domain"
+  grep -q 'default_realm = CS.LOCAL' "$conf" || fail "domain krb5 config must set the realm"
+  grep -q 'dns_lookup_kdc = true' "$conf" || fail "domain krb5 config must discover the KDC over DNS"
+  grep -qF '  .cs.local = CS.LOCAL' "$conf" || fail "domain krb5 config must map the domain"
+  grep -q 'rdns = false' "$conf" || fail "domain krb5 config must skip reverse lookups"
+  grep -q 'udp_preference_limit = 0' "$conf" || fail "domain krb5 config must force TCP"
+)
+pass "the Kerberos config follows the VM's domain state"
+
+# RDP credentials keep the domain so the launcher can build that config even
+# when the root-owned compose is unreadable.
+(
+  test_home=$(mktemp -d)
+  trap 'rm -rf "$test_home"' EXIT
+  set -- help
+  source "$windows_vm_command" >/dev/null
+  CREDENTIALS_FILE="$test_home/credentials"
+
+  write_credentials 'first.last@cs.local' 'pw' 'cs.local' || fail "write_credentials rejected a domain"
+  [[ $(read_credential DOMAIN) == cs.local ]] || fail "credentials did not keep the domain"
+  [[ $(read_credential USERNAME) == first.last@cs.local ]] || fail "credentials lost the username"
+  write_credentials 'alice' 'pw' '' || fail "write_credentials rejected an empty domain"
+  [[ -z $(read_credential DOMAIN) ]] || fail "credentials kept a stale domain"
+  write_credentials 'alice' 'pw2' || fail "write_credentials without a domain argument failed"
+  [[ $(read_credential PASSWORD) == pw2 && -z $(read_credential DOMAIN) ]] ||
+    fail "credentials round-trip broke without a domain argument"
+)
+pass "RDP credentials carry the domain for Kerberos configuration"
