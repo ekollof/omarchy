@@ -168,6 +168,8 @@ valid_username() {
 }
 valid_tz() { [[ $1 =~ ^[A-Za-z0-9_/.+-]{1,64}$ ]]; }
 valid_password() { [[ $1 =~ ^[[:print:]]{1,64}$ ]]; }
+# The guest-side command dockur runs at the end of an automatic installation.
+valid_command() { [[ $1 =~ ^[[:print:]]{1,512}$ ]]; }
 
 # An AD domain as an FQDN (corp.example.com). Regexes are kept in quoted
 # variables: an unquoted bracket expression makes bash word-split the pattern.
@@ -849,8 +851,8 @@ rollback_new_caller_mounts() {
 
 write_compose_atomically() (
   local ram="$1" cores="$2" disk="$3" username="$4" password="$5" tz="$6"
-  local domain="$7" ou="$8" autologin="$9"
-  local tmp="" rc esc_password esc_ou env_extras=""
+  local domain="$7" ou="$8" autologin="$9" guest_command="${10}"
+  local tmp="" rc esc_password esc_ou esc_command env_extras=""
   cleanup_writer() {
     rc=$?
     trap - EXIT
@@ -875,6 +877,11 @@ write_compose_atomically() (
   esc_ou=${ou//\\/\\\\}
   esc_ou=${esc_ou//\"/\\\"}
   esc_ou=${esc_ou//\$/\$\$}
+  # The guest-side command goes through the same escaping: it is an arbitrary
+  # printable string that must reach the container environment verbatim.
+  esc_command=${guest_command//\\/\\\\}
+  esc_command=${esc_command//\"/\\\"}
+  esc_command=${esc_command//\$/\$\$}
 
   # Optional settings, pre-built so the heredoc below keeps a fixed shape.
   # Empty for a default local install, leaving the compose byte-identical to
@@ -889,6 +896,9 @@ write_compose_atomically() (
   fi
   if [[ $autologin == "N" ]]; then
     env_extras+='      AUTOLOGIN: "N"'$'\n'
+  fi
+  if [[ -n $guest_command ]]; then
+    env_extras+='      COMMAND: "'"$esc_command"'"'$'\n'
   fi
 
   tmp=$(mktemp "$RUNTIME_DIR/.compose.XXXXXX") || exit 1
@@ -944,7 +954,7 @@ EOF
 # username/password pair becomes the unattended join credential, mirroring the
 # semantics of the underlying dockur/windows image.
 __priv_write_compose() {
-  local ram="" cores="" disk="" username="" password="" tz="" domain="" ou="" autologin="" key value
+  local ram="" cores="" disk="" username="" password="" tz="" domain="" ou="" autologin="" guest_command="" key value
 
   while IFS='=' read -r key value; do
     case "$key" in
@@ -957,6 +967,7 @@ __priv_write_compose() {
     DOMAIN) domain="$value" ;;
     DOMAIN_OU) ou="$value" ;;
     AUTOLOGIN) autologin="$value" ;;
+    COMMAND) guest_command="$value" ;;
     esac
   done
 
@@ -965,6 +976,10 @@ __priv_write_compose() {
   valid_disk "$disk" || { echo "invalid disk size: $disk" >&2; exit 2; }
   valid_password "$password" || { echo "invalid password" >&2; exit 2; }
   valid_tz "$tz" || tz="UTC"
+  [[ -z $guest_command ]] || valid_command "$guest_command" || {
+    echo "invalid COMMAND" >&2
+    exit 2
+  }
   [[ -z $autologin || $autologin == "N" ]] || {
     echo "invalid AUTOLOGIN: $autologin (only N is supported)" >&2
     exit 2
@@ -998,7 +1013,7 @@ __priv_write_compose() {
   # Readable by root and the docker group only. Any failure after mounting rolls
   # back just the binds this writer created and leaves an old compose untouched.
   write_compose_atomically "$ram" "$cores" "$disk" "$username" "$password" "$tz" \
-    "$domain" "$ou" "$autologin" || exit 2
+    "$domain" "$ou" "$autologin" "$guest_command" || exit 2
 }
 
 # Read the host source of a bind mount out of the compose (e.g. /storage).
@@ -1293,9 +1308,11 @@ available_storage_gb() {
 # Feed the collected settings to the elevated writer. The domain settings are
 # optional: DOMAIN (empty for a local-account install), DOMAIN_OU (only sent
 # with a domain) and AUTOLOGIN (only "N", to drop the console autologin).
+# COMMAND is an optional guest-side command dockur runs at the end of the
+# automatic installation (used to grant the login user RDP access).
 write_compose() {
   local ram="$1" cores="$2" disk="$3" username="$4" password="$5" tz="$6"
-  local domain="${7:-}" ou="${8:-}" autologin="${9:-}"
+  local domain="${7:-}" ou="${8:-}" autologin="${9:-}" guest_command="${10:-}"
   local settings="RAM=$ram
 CORES=$cores
 DISK=$disk
@@ -1308,6 +1325,8 @@ TZ=$tz
   [[ -n $ou ]] && settings+="DOMAIN_OU=$ou
 "
   [[ -n $autologin ]] && settings+="AUTOLOGIN=$autologin
+"
+  [[ -n $guest_command ]] && settings+="COMMAND=$guest_command
 "
   printf '%s' "$settings" | priv write_compose
 }
@@ -1424,7 +1443,7 @@ migrate_legacy_compose() {
   # The elevated writer derives both mount anchors from the authenticated uid;
   # it never consumes volume paths from this user-owned legacy file. Legacy
   # composes predate domain support, so no join settings are carried over.
-  if ! write_compose "$ram" "$cores" "$disk" "$username" "$password" "$tz" "" "" ""; then
+  if ! write_compose "$ram" "$cores" "$disk" "$username" "$password" "$tz" "" "" "" ""; then
     echo "Could not migrate the existing configuration automatically." >&2
     echo "Re-run: omarchy-windows-vm install" >&2
     return 1
@@ -1734,11 +1753,23 @@ EOF
   local tz
   tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)
 
+  # Console logon on a domain machine works for every domain user, but RDP is
+  # gated by the Remote Desktop Services right, which only Administrators and
+  # the local Remote Desktop Users group hold. Grant the right to all
+  # authenticated accounts so signing in over RDP behaves like walking up to
+  # the machine. The VM's ports are bound to localhost only, and a narrower
+  # grant can be applied later by removing the well-known group member.
+  GUEST_COMMAND=""
+  if [[ -n $DOMAIN ]]; then
+    GUEST_COMMAND="powershell -NoProfile -Command \"Add-LocalGroupMember -Group 'Remote Desktop Users' -Member ([System.Security.Principal.SecurityIdentifier]'S-1-5-11')\""
+  fi
+
   # Write the root-owned compose from the validated settings (one prompt if
   # sudoless Docker is off). The writer pins the familiar home directories (or
   # their legitimate symlink targets) into root-protected bind anchors.
   write_compose "$SELECTED_RAM" "$SELECTED_CORES" "$SELECTED_DISK" \
-    "$USERNAME" "$PASSWORD" "$tz" "$DOMAIN" "$DOMAIN_OU" "$AUTOLOGIN" || {
+    "$USERNAME" "$PASSWORD" "$tz" "$DOMAIN" "$DOMAIN_OU" "$AUTOLOGIN" \
+    "$GUEST_COMMAND" || {
     echo "❌ Failed to write the Windows VM configuration."
     exit 1
   }

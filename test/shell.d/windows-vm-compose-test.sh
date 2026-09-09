@@ -89,7 +89,7 @@ pass "password with quote, backslash, and dollar round-trips"
 # emits the join settings and disables the console autologin; a plain write
 # keeps the compose free of them; bad settings are refused before any mount
 # work happens. write_domain feeds the same KEY=VALUE stream the wizard sends.
-write_domain() { # RAM CORES DISK USER PASS TZ [DOMAIN [OU [AUTOLOGIN]]]
+write_domain() { # RAM CORES DISK USER PASS TZ [DOMAIN [OU [AUTOLOGIN [COMMAND]]]]
   local payload="RAM=$1
 CORES=$2
 DISK=$3
@@ -102,6 +102,8 @@ DOMAIN=$7"
 DOMAIN_OU=$8"
   [[ -n ${9:-} ]] && payload+="
 AUTOLOGIN=$9"
+  [[ -n ${10:-} ]] && payload+="
+COMMAND=${10}"
   printf '%s\n' "$payload" | __priv_write_compose
 }
 
@@ -154,6 +156,29 @@ write_domain 4G 2 64G admin pw UTC corp.example.com "$tricky_ou" N
 grep -qF 'DOMAIN_OU: "OU=C\"omp\\,DC=x,$$DC=y"' "$COMPOSE" ||
   fail "OU was not escaped for the compose: $(grep 'DOMAIN_OU' "$COMPOSE" || true)"
 pass "OU with quote, backslash, and dollar is escaped for the compose"
+
+# The guest-side install command is passed through escaped, and a plain
+# install emits none.
+reset_case
+prepare_user_mount_sources
+tricky_cmd='powershell -NoProfile -Command "Add-LocalGroupMember x $y"'
+write_domain 4G 2 64G admin pw UTC corp.example.com '' N "$tricky_cmd"
+grep -qF 'COMMAND: "powershell -NoProfile -Command \"Add-LocalGroupMember x $$y\""' "$COMPOSE" ||
+  fail "COMMAND was not escaped for the compose: $(grep 'COMMAND' "$COMPOSE" || true)"
+pass "guest install command is escaped for the compose"
+
+reset_case
+prepare_user_mount_sources
+write 4G 2 64G alice s3cret UTC
+grep -q 'COMMAND:' "$COMPOSE" && fail "plain write emitted a guest command"
+pass "plain local-account compose carries no guest command"
+
+long_command=$(printf 'x%.0s' {1..513})
+rm -f "$COMPOSE"
+printf 'RAM=4G\nCORES=2\nDISK=64G\nUSERNAME=x\nPASSWORD=p\nTZ=UTC\nCOMMAND=%s\n' \
+  "$long_command" | __priv_write_compose 2>/dev/null && fail "accepted an over-long COMMAND"
+[[ ! -f $COMPOSE ]] || fail "rejected COMMAND wrote a compose"
+pass "guest install command is validated by the writer"
 
 # Domain settings are re-validated by the privileged writer and refused before
 # any mount work happens, so nothing is written and no bind is created.
