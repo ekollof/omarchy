@@ -145,3 +145,41 @@ pass "the install share watcher outlives the terminal install ran in"
   [[ -e $test_home/elevated ]] || fail "priv did not reach pkexec with a matching privileged copy"
 )
 pass "elevation refuses a mismatched privileged copy and accepts an identical one"
+
+# Domain settings validation, shared by the wizard prompts and the privileged
+# writer. Pure functions, so no runtime or mount setup is involved.
+(
+  set -- help
+  source "$windows_vm_command" >/dev/null
+
+  valid_domain corp.example.com || fail "valid_domain rejected an FQDN"
+  valid_domain a.co || fail "valid_domain rejected a two-label FQDN"
+  valid_domain "a-1.b-2.corp.example.com" || fail "valid_domain rejected hyphenated labels"
+  valid_domain not_a_domain && fail "valid_domain accepted an underscore"
+  valid_domain nodot && fail "valid_domain accepted a single label"
+  valid_domain "-bad.com" && fail "valid_domain accepted a leading hyphen"
+  valid_domain "bad-.com" && fail "valid_domain accepted a trailing label hyphen"
+  valid_domain "a..com" && fail "valid_domain accepted an empty label"
+  valid_domain "-.com" && fail "valid_domain accepted a hyphen-only label"
+  long_domain=$(printf 'a%.0s' {1..63})
+  valid_domain "$long_domain.$long_domain.$long_domain.$long_domain.$long_domain" &&
+    fail "valid_domain accepted a name over 255 characters"
+
+  valid_ou 'OU=Computers,DC=corp,DC=example,DC=com' || fail "valid_ou rejected a standard DN"
+  valid_ou 'OU=C"omp\,DC=x,$DC=y' || fail "valid_ou rejected escapable characters"
+  valid_ou 'OU=X;drop' && fail "valid_ou accepted a semicolon"
+  valid_ou $'OU=X\ndrop' && fail "valid_ou accepted a newline"
+
+  valid_join_account 'admin@corp.example.com' || fail "valid_join_account rejected a UPN"
+  valid_join_account 'jdoe' || fail "valid_join_account rejected a bare name"
+  valid_join_account 'corp\admin' && fail "valid_join_account accepted the backslash form"
+  valid_join_account 'admin@nodot' && fail "valid_join_account accepted a single-label UPN suffix"
+  valid_join_account 'admin@' && fail "valid_join_account accepted an empty UPN suffix"
+
+  valid_rdp_username 'alice@corp.example.com' || fail "valid_rdp_username rejected a UPN"
+  valid_rdp_username 'CORP\alice' || fail "valid_rdp_username rejected the NetBIOS form"
+  valid_rdp_username '\alice' && fail "valid_rdp_username accepted an empty NetBIOS domain"
+  valid_rdp_username 'CORP\' && fail "valid_rdp_username accepted an empty NetBIOS user"
+  valid_rdp_username 'alice' || fail "valid_rdp_username rejected a bare name"
+)
+pass "domain, OU, join account, and RDP username validation is strict"
