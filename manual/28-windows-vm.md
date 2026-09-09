@@ -10,6 +10,8 @@ The installer also asks whether to sign in automatically when the VM starts, and
 
 Domain-joined VMs log on **inside** the RDP session instead of through a pre-logon exchange: when the session opens you get the Windows logon screen and type your domain credentials there (the pre-logon exchange NLA uses must round-trip to the domain controller, which high-latency VPN paths cannot do inside the connection's small timeouts). Pressing enter at the logon screen is enough on a fast network, but expect a pause on a VPN.
 
+By default the installer grants **all authenticated domain accounts** the right to sign in over RDP on the VM (the same right console logons get), so any valid domain account works — not just the login user you entered. The grant is machine-local and the VM's ports are bound to localhost; to tighten it, remove `Authenticated Users` from the local `Remote Desktop Users` group inside the guest and add specific accounts instead.
+
  ![windows-vm](images/windows-vm.webp)
 
 ## Using it
