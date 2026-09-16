@@ -652,7 +652,7 @@ schedule_share_privacy_restore() {
   # which is a uwsm-app systemd scope. Dismissing that window SIGTERMs leftover
   # cgroup members; trap '' HUP does not cover that. A user unit is outside
   # the scope, so the wait survives the terminal.
-  if command -v systemd-run >/dev/null; then
+  if omarchy-cmd-present systemd-run; then
     systemctl --user reset-failed omarchy-windows-share-privacy.service 2>/dev/null || true
     systemctl --user stop omarchy-windows-share-privacy.service 2>/dev/null || true
     if systemd-run --user --quiet --collect \
