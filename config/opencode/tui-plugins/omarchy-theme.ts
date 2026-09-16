@@ -137,8 +137,13 @@ const plugin: TuiPlugin = async (api) => {
 
   try {
     fs.mkdirSync(dir, { recursive: true })
-    watcher = fs.watch(dir, (_event, filename) => {
-      if (filename && filename !== `${THEME_NAME}.json`) return
+    watcher = fs.watch(dir, (_event, _filename) => {
+      // React to any change in the directory, not just to omarchy.json
+      // itself: opencode runs on Bun, whose fs.watch does not reliably
+      // report the atomic rename that replaces omarchy.json (only the
+      // temp-file write/rename precursors show up). The debounced apply
+      // below re-reads omarchy.json itself, so unrelated files changing
+      // here cost at most one cheap re-read.
       schedule()
     })
   } catch {
