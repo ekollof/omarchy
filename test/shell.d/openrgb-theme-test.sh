@@ -53,6 +53,16 @@ grep -F 'openrgb -d 1 -m Rainbow Gradient -c afc7fa -b 100' "$call_log" >/dev/nu
 pass "gradient-capable devices prefer their gradient mode"
 
 : >"$call_log"
+OPENRGB_LIST_DEVICES='0: Logitech G213
+  Modes: [Direct] Off Cycle Wave Breathing
+1: Fancy Pad
+  Modes: [Direct] Static Off' run_openrgb_theme
+grep -F 'openrgb -d 0 -m direct -c afc7fa -b 100' "$call_log" >/dev/null || fail "Direct-only device gets direct mode instead of a silently rejected static" "$(cat "$call_log")"
+grep -F 'openrgb -d 1 -m static -c afc7fa -b 100' "$call_log" >/dev/null || fail "device with Static keeps static" "$(cat "$call_log")"
+[[ $(grep -cE 'openrgb -d 0 -m (static|Direct) ' "$call_log") == 0 ]] || fail "Direct-only device never gets static or the bracketed Direct form" "$(cat "$call_log")"
+pass "Direct-only devices apply through direct mode"
+
+: >"$call_log"
 OPENRGB_LIST_DEVICES="$PLAIN_DEVICES" OPENRGB_LIST_FAIL=1 run_openrgb_theme || fail "failed detection still exits zero"
 grep -F 'openrgb -m static -c afc7fa -b 100' "$call_log" >/dev/null || fail "failed detection falls back to static broadcast" "$(cat "$call_log")"
 pass "failed detection falls back to static broadcast"
