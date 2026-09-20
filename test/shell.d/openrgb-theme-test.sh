@@ -63,6 +63,22 @@ grep -F 'openrgb -d 1 -m static -c afc7fa -b 100' "$call_log" >/dev/null || fail
 pass "Direct-only devices apply through direct mode"
 
 : >"$call_log"
+OPENRGB_LIST_DEVICES='0: Corsair Board
+  Modes: [Direct] Static Off
+1: Logitech G213
+  Modes: [Direct] Off Cycle Wave Breathing' run_openrgb_theme
+grep -F 'openrgb -d 0 -m static -c afc7fa -b 100' "$call_log" >/dev/null || fail "Static device before a Direct-only one keeps static" "$(cat "$call_log")"
+grep -F 'openrgb -d 1 -m direct -c afc7fa -b 100' "$call_log" >/dev/null || fail "Direct-only device after a Static one gets direct regardless of enumeration order" "$(cat "$call_log")"
+pass "Static detection does not leak across devices"
+
+: >"$call_log"
+OPENRGB_LIST_DEVICES='0: Fancy Strip
+  Modes: Direct Gradient Wave' run_openrgb_theme
+grep -F 'openrgb -d 0 -m Gradient -c afc7fa -b 100' "$call_log" >/dev/null || fail "gradient still wins over direct where both exist" "$(cat "$call_log")"
+[[ $(grep -c 'openrgb -d 0 ' "$call_log") == 1 ]] || fail "device with a gradient mode is applied exactly once" "$(cat "$call_log")"
+pass "gradient-capable Direct devices keep one gradient apply"
+
+: >"$call_log"
 OPENRGB_LIST_DEVICES="$PLAIN_DEVICES" OPENRGB_LIST_FAIL=1 run_openrgb_theme || fail "failed detection still exits zero"
 grep -F 'openrgb -m static -c afc7fa -b 100' "$call_log" >/dev/null || fail "failed detection falls back to static broadcast" "$(cat "$call_log")"
 pass "failed detection falls back to static broadcast"
