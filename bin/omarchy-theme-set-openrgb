@@ -48,7 +48,7 @@ DEVICE_IDS=()
 
 if [[ -n $devices ]]; then
   while IFS=$'\t' read -r id mode is_direct; do
-    if [[ -n $mode ]]; then
+    if [[ -n $mode && $mode != "-" ]]; then
       GRADIENT_MODE_FOR_DEVICE[$id]="$mode"
     else
       DEVICE_IDS+=("$id")
@@ -67,32 +67,35 @@ if [[ -n $devices ]]; then
       modes = substr($0, 9)
       stripped = modes
       gsub(/[\[\]]/, "", stripped)
+      emitted = 0
       if (match(modes, /'"'"'[^'"'"']*[Gg]radient[^'"'"']*'"'"'/)) {
         print current "\t" substr(modes, RSTART + 1, RLENGTH - 2)
+        emitted = 1
       } else {
         count = split(stripped, parts, /[ ]+/)
         for (i = 1; i <= count; i++) {
           if (parts[i] ~ /[Gg]radient/) {
             print current "\t" parts[i]
+            emitted = 1
             break
           }
         }
+      }
+      if (!emitted) {
+        has_static = 0
+        has_direct = 0
         for (i = 1; i <= count; i++) {
-          if (parts[i] ~ /^[Ss]tatic$/) {
-            has_static = 1
-            break
-          }
+          if (parts[i] ~ /^[Ss]tatic$/) has_static = 1
+          if (parts[i] ~ /^[Dd]irect$/) has_direct = 1
         }
-        if (!has_static) {
-          for (i = 1; i <= count; i++) {
-            if (parts[i] ~ /^[Dd]irect$/) {
-              # Direct-only devices (e.g. Logitech G213) reject `static`, and
-              # openrgb still exits 0 on that failure, so a static apply would
-              # silently no-op. Direct is load-bearing mode-wise (#7977).
-              print current "\t\t" "direct"
-              break
-            }
-          }
+        if (!has_static && has_direct) {
+          # Direct-only devices (e.g. Logitech G213) reject `static`, and
+          # openrgb still exits 0 on that failure, so a static apply would
+          # silently no-op. Direct is load-bearing mode-wise (#7977).
+          # One line per device: static devices emit nothing (the bare id
+          # line already classifies them). The `-` placeholder keeps the
+          # read loop from collapsing the empty mode (tab is IFS whitespace).
+          print current "\t-\t" "direct"
         }
       }
       current = ""
