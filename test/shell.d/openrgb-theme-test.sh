@@ -59,6 +59,7 @@ OPENRGB_LIST_DEVICES='0: Logitech G213
   Modes: [Direct] Static Off' run_openrgb_theme
 grep -F 'openrgb -d 0 -m direct -c afc7fa -b 100' "$call_log" >/dev/null || fail "Direct-only device gets direct mode instead of a silently rejected static" "$(cat "$call_log")"
 grep -F 'openrgb -d 1 -m static -c afc7fa -b 100' "$call_log" >/dev/null || fail "device with Static keeps static" "$(cat "$call_log")"
+[[ $(grep -c 'openrgb -d 0 ' "$call_log") == 1 ]] || fail "Direct-only device is applied exactly once" "$(cat "$call_log")"
 [[ $(grep -cE 'openrgb -d 0 -m (static|Direct) ' "$call_log") == 0 ]] || fail "Direct-only device never gets static or the bracketed Direct form" "$(cat "$call_log")"
 pass "Direct-only devices apply through direct mode"
 
@@ -69,6 +70,7 @@ OPENRGB_LIST_DEVICES='0: Corsair Board
   Modes: [Direct] Off Cycle Wave Breathing' run_openrgb_theme
 grep -F 'openrgb -d 0 -m static -c afc7fa -b 100' "$call_log" >/dev/null || fail "Static device before a Direct-only one keeps static" "$(cat "$call_log")"
 grep -F 'openrgb -d 1 -m direct -c afc7fa -b 100' "$call_log" >/dev/null || fail "Direct-only device after a Static one gets direct regardless of enumeration order" "$(cat "$call_log")"
+[[ $(grep -c 'openrgb -d 1 ' "$call_log") == 1 ]] || fail "Direct-only device is applied exactly once regardless of enumeration order" "$(cat "$call_log")"
 pass "Static detection does not leak across devices"
 
 : >"$call_log"

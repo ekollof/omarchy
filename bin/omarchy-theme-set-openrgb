@@ -50,6 +50,10 @@ if [[ -n $devices ]]; then
   while IFS=$'\t' read -r id mode is_direct; do
     if [[ -n $mode && $mode != "-" ]]; then
       GRADIENT_MODE_FOR_DEVICE[$id]="$mode"
+    elif [[ $mode == "-" ]]; then
+      # Direct-only marker: the bare id line already queued this device,
+      # so only record the mode without pushing a second entry.
+      DIRECT_DEVICE[$id]=1
     else
       DEVICE_IDS+=("$id")
       if [[ $is_direct == direct ]]; then
