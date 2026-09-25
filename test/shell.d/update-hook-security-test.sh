@@ -10,9 +10,13 @@ copy_boundary_file bin/omarchy-refresh-pacman
 rm "$SUDO_TEST_ROOT/bin/omarchy-update-aur-pkgs"
 copy_boundary_file bin/omarchy-update-aur-pkgs
 export OMARCHY_UPDATE_LOGGED=1
+# Trusted phases use caching sudo, so bare sudo must resolve to the mock, not
+# the host. (The wrapper only shadows sudo around untrusted phases now.)
+ln -s ../mock/sudo "$SUDO_TEST_ROOT/bin/sudo"
 
 run_update() {
-  "$SUDO_TEST_ROOT/bin/omarchy-update" "$@" >"$boundary_tmp/output" 2>&1
+  PATH="$SUDO_TEST_ROOT/bin:$PATH" \
+    "$SUDO_TEST_ROOT/bin/omarchy-update" "$@" >"$boundary_tmp/output" 2>&1
 }
 
 for args in '-y' ''; do
@@ -20,12 +24,13 @@ for args in '-y' ''; do
   touch "$SUDO_TEST_CACHE"
   run_update $args || fail "update failed" "$(<"$boundary_tmp/output")"
   assert_boundary_cold "successful update"
-  grep -q '^sudo -N /usr/bin/true$' "$SUDO_TEST_LOG" || fail "update package helpers must use no-update sudo"
+  grep -q '^sudo /usr/bin/true$' "$SUDO_TEST_LOG" || fail "trusted update phases must use caching sudo"
   python3 - "$SUDO_TEST_LOG" <<'PY'
 import sys
 s=open(sys.argv[1]).read().splitlines()
 positions=[next(i for i,line in enumerate(s) if line.startswith(prefix)) for prefix in ['step:omarchy-update-restart --services-only','step:yay','step:omarchy-hook post-update','step:omarchy-update-mise','step:omarchy-update-stay-awake stop','step:omarchy-update-restart --reboot-only']]
 assert positions==sorted(positions), s
+assert not any(line.startswith('sudo -N ') for line in s[:positions[1]]), s
 assert not any(line.startswith('sudo -N ') for line in s[positions[2]:]), s
 PY
   pass "update $args runs privileged phases before hooks and exits cold"
