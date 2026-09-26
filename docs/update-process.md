@@ -57,7 +57,7 @@ privileged work should invoke the appropriate helper or privilege prompt.
 Migrations must be idempotent; if one user already applied a machine-wide repair,
 the migration should no-op for other users.
 
-When invoked by the update, migrations inherit its cold credential state and no-update sudo wrapper. The standalone migration runner has its own security changes in the migration-boundary PR; this update change does not establish that standalone boundary. Historical migrations remain strictly ordered.
+When invoked by the update, migrations run after the package phases on a cold timestamp and behind the no-update sudo wrapper. A migration sudo authorizes that command only and cannot refresh a credential for the orphan removal and service restarts that follow, which use caching sudo again. The standalone migration runner has its own security changes in the migration-boundary PR; this update change does not establish that standalone boundary. Historical migrations remain strictly ordered.
 
 For watchers and diagnostics, `omarchy-migrate --pending` prints pending
 migration names and exits `0` when any are pending. When no migrations are
@@ -133,14 +133,14 @@ omarchy-update
   │  installed but unconfigured fails the snapshot loudly, pointing at
   │  install/config/snapper.sh, and the update continues without one)
   ├─ omarchy-update-stay-awake start
-  ├─ run system-package updates
-  ├─ invalidate sudo, then run migrations and all later privileged work with
-  │  no-update authentication
-  ├─ run orphan review and log analysis
+  │    └─ authenticate the inhibitor with sudo --no-update; do not revoke the update timestamp
+  ├─ dev checkout fast-forward, keyring, and system packages on the cached timestamp
+  ├─ invalidate sudo, run migrations behind the no-update wrapper, invalidate again
+  ├─ orphan review, log analysis, and status
   ├─ omarchy-update-status
   │    └─ refresh or clear the shell update indicator
-  ├─ restart marked services and the shell
-  ├─ invalidate sudo credentials, then update AUR packages
+  ├─ restart marked services on a fresh cached timestamp
+  ├─ invalidate sudo, then update AUR packages behind no-update authentication
   ├─ invalidate again, run the post-update hook, invalidate again, then update mise tools
   ├─ omarchy-update-stay-awake stop
   │    └─ release the sleep inhibitor and restore shell idle state, if changed
@@ -149,15 +149,15 @@ omarchy-update
 
 Important behavior:
 
-- Protected update entrypoints require the session's canonical `OMARCHY_PATH` to match their own checkout or the packaged `/usr/bin` entrypoint before selecting commands or the sudo wrapper. This preserves intentionally trusted development checkouts while rejecting a command paired with a different source root. System phases use a fixed command search path; user PATH is restored behind the sudo wrapper for hooks and mise.
+- Protected update entrypoints require the session's canonical `OMARCHY_PATH` to match their own checkout or the packaged `/usr/bin` entrypoint before selecting commands or the sudo wrapper. This preserves intentionally trusted development checkouts while rejecting a command paired with a different source root. Prune, snapshot, keyring, pacman, orphan removal, and service restarts run on the inherited session path with caching sudo. Migrations run behind the no-update wrapper, as do the untrusted phases; user PATH is restored behind the sudo wrapper for hooks and mise.
 - Mixed-trust update entrypoints start Bash in privileged mode, discard `BASH_ENV`, `ENV`, and exported-function records before launching helpers, and reject an ordinary `bash path/to/command` invocation. Run them as executables (normally through the `omarchy` CLI); `/usr/bin/bash -p path/to/command` is the explicit interpreter form. This keeps shell startup injection from replacing the no-update sudo boundary.
 - In dev-link mode, `omarchy update` fast-forwards the active checkout from its configured upstream before changing system packages or running migrations.
-- Migrations remain in chronological order even though historical entries mix user-controlled code with later privileged repairs. Before entering that mixed-trust tail, Omarchy invalidates its timestamp and forces every later sudo call—including AUR's configurable sudo command—to use `--no-update`; prompts authorize one command without publishing a reusable timestamp. Yay's credential loop is disabled for the update.
-- User-controlled post-update hooks and mise tools run only after every sudo-capable update stage. Omarchy invalidates its sudo timestamp before each boundary and on every exit; detached children therefore have no later reusable update authorization to wait for.
+- Migrations remain in chronological order even though historical entries mix user-controlled code with later privileged repairs. Omarchy invalidates its timestamp before `omarchy-migrate` and runs that command behind the no-update wrapper, so a migration sudo cannot publish a reusable timestamp. Orphan removal and service restarts then use caching sudo again. Before AUR builds, hooks, and mise, Omarchy invalidates its timestamp once more and forces sudo calls—including AUR's configurable sudo command—to use `--no-update`. Yay's credential loop is disabled for the update.
+- User-controlled post-update hooks and mise tools run only after every sudo-capable update stage. Omarchy invalidates its sudo timestamp before each untrusted boundary (AUR builds, hooks, mise) and on every exit; detached children therefore have no later reusable update authorization to wait for.
 - This lifecycle controls authorization created by the protected workflow. `sudo -N` prevents cache updates but can use an existing valid credential, and `sudo -k` revokes the current session's timestamp. It does not isolate the account from unrelated concurrent authentication in another workflow.
-- Sleep inhibition authenticates before detaching, drops the held command back to the caller, and closes both update lock descriptors before the persistent process starts. Cleanup accepts only caller-owned, mode-0600, single-link state and revalidates the recorded PID, process start time, owner, and random token immediately before every signal.
+- Sleep inhibition authenticates with `sudo --no-update` before detaching. From `omarchy update` it does not revoke the timestamp, because `sudo -k` is account-wide and would discard the authorization the package phases are sharing. A direct invocation still revokes on entry and exit. It drops the held command back to the caller and closes both update lock descriptors before the persistent process starts. Cleanup accepts only caller-owned, mode-0600, single-link state and revalidates the recorded PID, process start time, owner, and random token immediately before every signal.
 - Channel switching establishes the same boundary before dev link/unlink, refresh and package operations. It keeps the wrapper first when changing source roots, carries the original user PATH into update hooks and mise, and checks after each package transaction that the wrapper still exists before any further privileged step, since a transaction can replace the running tree with a release that predates it; when it is gone, or the destination otherwise lacks it, the switch stops after the package switch with instructions to run that release's update from a fresh session rather than letting a bare `sudo` or an updater that authenticates without `--no-update` publish a timestamp. Failed and interrupted channel switches revoke on exit.
-- `-y` exports `OMARCHY_UPDATE_UNATTENDED=1` and suppresses Omarchy confirmation prompts. Interactive review steps (orphan removal, conflict handoff) report and skip instead of blocking. Privileged commands still require sudo authorization, and command-scoped authentication can prompt separately for each command.
+- `-y` exports `OMARCHY_UPDATE_UNATTENDED=1` and suppresses Omarchy confirmation prompts. Interactive review steps (orphan removal, conflict handoff) report and skip instead of blocking. Privileged commands still require sudo authorization: one fresh authorization covers prune, snapshot, keyring, and pacman; migrations re-authenticate behind the no-update wrapper; orphan removal and service restarts share a later cached authorization; AUR, hooks, and mise each re-authenticate behind the wrapper instead of reusing that timestamp.
 - The free-space requirement uses a 10 GiB threshold and stops the update before
   confirmation when it is not met. If free space cannot be determined, the
   check is silently skipped. Set `OMARCHY_UPDATE_FORCE=1` to bypass the check.

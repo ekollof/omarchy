@@ -5,6 +5,8 @@ set -euo pipefail
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 source "$SHELL_TEST_DIR/fixtures/sudo-boundary-test.sh"
 copy_boundary_file bin/omarchy-update
+# Step stubs must resolve to the fixture, and their bare sudo to the mock.
+ln -s ../mock/sudo "$SUDO_TEST_ROOT/bin/sudo"
 
 # Model the two exec boundaries without a host update log or a real lock.
 # Both child processes inherit the environment exactly as script/lock would.
@@ -52,7 +54,7 @@ for entry in fresh logged locked; do
     logged) export OMARCHY_UPDATE_LOGGED=1 ;;
     locked) export OMARCHY_UPDATE_LOGGED=1 SUDO_TEST_LOCKED=1 ;;
   esac
-  PATH="$boundary_tmp/user commands:$PATH" "$SUDO_TEST_ROOT/bin/omarchy-update" -y >"$boundary_tmp/output" 2>&1 ||
+  PATH="$boundary_tmp/user commands:$SUDO_TEST_ROOT/bin:$PATH" "$SUDO_TEST_ROOT/bin/omarchy-update" -y >"$boundary_tmp/output" 2>&1 ||
     fail "$entry update lost the original user PATH" "$(<"$boundary_tmp/output")"
   grep -q '^user-tool:omarchy-hook$' "$SUDO_TEST_LOG" || fail "$entry hook could not run a user-installed tool"
   grep -q '^user-tool:omarchy-update-mise$' "$SUDO_TEST_LOG" || fail "$entry mise could not run a user-installed tool"

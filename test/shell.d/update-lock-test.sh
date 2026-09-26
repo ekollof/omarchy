@@ -355,3 +355,12 @@ if run_with_lock_env "$SUDO_TEST_ROOT/bin/omarchy-update-stay-awake" start; then
 fi
 [[ ! -e $stay_awake_helper_state/inhibit-pid ]] || fail "failed revocation started an inhibitor"
 pass "failed initial revocation prevents standalone inhibition"
+
+# omarchy-update holds the shared timestamp across this helper. A direct run
+# still revokes; the update path must not.
+reset_boundary
+touch "$SUDO_TEST_CACHE"
+OMARCHY_UPDATE_OWNS_SUDO=1 run_with_lock_env "$SUDO_TEST_ROOT/bin/omarchy-update-stay-awake" stop
+[[ -e $SUDO_TEST_CACHE ]] || fail "update-owned inhibition cleared the shared timestamp"
+! grep -qx 'sudo -k' "$SUDO_TEST_LOG" || fail "update-owned inhibition revoked sudo" "$(<"$SUDO_TEST_LOG")"
+pass "update-owned inhibition leaves the shared sudo timestamp alone"

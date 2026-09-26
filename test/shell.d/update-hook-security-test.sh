@@ -10,9 +10,33 @@ copy_boundary_file bin/omarchy-refresh-pacman
 rm "$SUDO_TEST_ROOT/bin/omarchy-update-aur-pkgs"
 copy_boundary_file bin/omarchy-update-aur-pkgs
 export OMARCHY_UPDATE_LOGGED=1
+# Trusted phases use caching sudo, so bare sudo must resolve to the mock, not
+# the host. (The wrapper only shadows sudo around untrusted phases now.)
+ln -s ../mock/sudo "$SUDO_TEST_ROOT/bin/sudo"
+# The shared step stub does not call sudo for migrations or orphan removal.
+# These two do, so the test can see which boundary each phase authenticates on.
+rm "$SUDO_TEST_ROOT/bin/omarchy-migrate" "$SUDO_TEST_ROOT/bin/omarchy-update-orphan-pkgs"
+cat >"$SUDO_TEST_ROOT/bin/omarchy-migrate" <<'STUB'
+#!/bin/bash
+set -euo pipefail
+printf 'step:%s %s\n' "${0##*/}" "$*" >>"$SUDO_TEST_LOG"
+if [[ ${SUDO_TEST_FAIL_STEP:-} == "omarchy-migrate" ]]; then
+  touch "$SUDO_TEST_CACHE"
+  exit 17
+fi
+sudo /usr/bin/true
+STUB
+cat >"$SUDO_TEST_ROOT/bin/omarchy-update-orphan-pkgs" <<'STUB'
+#!/bin/bash
+set -euo pipefail
+printf 'step:%s %s\n' "${0##*/}" "$*" >>"$SUDO_TEST_LOG"
+sudo /usr/bin/true
+STUB
+chmod +x "$SUDO_TEST_ROOT/bin/omarchy-migrate" "$SUDO_TEST_ROOT/bin/omarchy-update-orphan-pkgs"
 
 run_update() {
-  "$SUDO_TEST_ROOT/bin/omarchy-update" "$@" >"$boundary_tmp/output" 2>&1
+  PATH="$SUDO_TEST_ROOT/bin:$PATH" \
+    "$SUDO_TEST_ROOT/bin/omarchy-update" "$@" >"$boundary_tmp/output" 2>&1
 }
 
 for args in '-y' ''; do
@@ -20,12 +44,21 @@ for args in '-y' ''; do
   touch "$SUDO_TEST_CACHE"
   run_update $args || fail "update failed" "$(<"$boundary_tmp/output")"
   assert_boundary_cold "successful update"
-  grep -q '^sudo -N /usr/bin/true$' "$SUDO_TEST_LOG" || fail "update package helpers must use no-update sudo"
+  grep -q '^sudo /usr/bin/true$' "$SUDO_TEST_LOG" || fail "trusted update phases must use caching sudo"
   python3 - "$SUDO_TEST_LOG" <<'PY'
 import sys
 s=open(sys.argv[1]).read().splitlines()
 positions=[next(i for i,line in enumerate(s) if line.startswith(prefix)) for prefix in ['step:omarchy-update-restart --services-only','step:yay','step:omarchy-hook post-update','step:omarchy-update-mise','step:omarchy-update-stay-awake stop','step:omarchy-update-restart --reboot-only']]
 assert positions==sorted(positions), s
+migrate=next(i for i,line in enumerate(s) if line.startswith('step:omarchy-migrate'))
+orphan=next(i for i,line in enumerate(s) if line.startswith('step:omarchy-update-orphan-pkgs'))
+assert s[migrate-1]=='sudo -k', s
+assert s[migrate+1].startswith('sudo -N '), s
+assert s[migrate+2]=='sudo -k', s
+assert any(line=='sudo /usr/bin/true' for line in s[:migrate]), s
+assert not any(line.startswith('sudo -N ') for line in s[:migrate]), s
+assert s[orphan+1]=='sudo /usr/bin/true', s
+assert not any(line.startswith('sudo -N ') for line in s[migrate+2:positions[1]]), s
 assert not any(line.startswith('sudo -N ') for line in s[positions[2]:]), s
 PY
   pass "update $args runs privileged phases before hooks and exits cold"

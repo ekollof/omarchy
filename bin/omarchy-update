@@ -25,7 +25,13 @@ unset OMARCHY_UPDATE_USER_PATH
 # exits through the cleanup path.
 omarchy_security_install_sudo_cleanup_traps
 omarchy_security_revoke_sudo_timestamp || exit 1
-omarchy_security_enable_no_update_sudo
+# First-party phases below share one cached authorization, so a sudo without
+# --no-update support must stop the update before any work, not halfway to the
+# untrusted phases. The wrapper itself is only installed around those phases.
+if ! omarchy_security_sudo_supports_no_update; then
+  echo "This sudo does not support --no-update; refusing mixed-trust work." >&2
+  exit 1
+fi
 
 update_stay_awake_stopped=0
 cleanup_update() {
@@ -71,6 +77,9 @@ if [[ ${1:-} == "-y" ]] || omarchy-update-confirm; then
   omarchy-snapshot create || (($? == 127)) ||
     echo -e "\e[33mContinuing the update without a snapshot.\e[0m" >&2
 
+  # The inhibitor authenticates with sudo -N. Tell it not to revoke: sudo -k
+  # is account-wide and would drop the timestamp prune and snapshot just made.
+  export OMARCHY_UPDATE_OWNS_SUDO=1
   omarchy-update-stay-awake start
 
   # Preserve the established development-checkout update ordering.
@@ -82,12 +91,13 @@ if [[ ${1:-} == "-y" ]] || omarchy-update-confirm; then
   # takes the update with it rather than migrating against what is still on disk.
   omarchy-update-system-pkgs
 
-  # Historical migrations are strictly ordered and mix user hooks/downloaded
-  # tooling with privileged repairs. The no-update sudo wrapper has covered the
-  # whole update, so neither the package transaction nor a later repair can
-  # publish a timestamp to a detached migration child.
+  # Migrations can run mise or install hooks. Drop the timestamp from the
+  # package phases and force --no-update so a migration sudo authorizes one
+  # command and cannot publish a credential for orphan removal or restarts.
   omarchy_security_revoke_sudo_timestamp
-  omarchy-migrate
+  PATH="$OMARCHY_PATH/default/omarchy/sudo-no-update:$PATH" omarchy-migrate
+  omarchy_security_revoke_sudo_timestamp
+
   omarchy-update-orphan-pkgs
 
   omarchy-update-analyze-logs
@@ -97,9 +107,11 @@ if [[ ${1:-} == "-y" ]] || omarchy-update-confirm; then
   # update tooling; the reboot-only phase below performs no privileged work.
   omarchy-update-restart --services-only
 
-  # AUR package installation must also use the no-update wrapper. Finish
-  # update-owned system work before build code, hooks, or mise can run.
+  # AUR package builds execute third-party build code, so they run behind the
+  # no-update wrapper with a cold credential on both sides. Hooks and mise
+  # below get the same treatment through their own wrapper PATH.
   omarchy_security_revoke_sudo_timestamp
+  omarchy_security_enable_no_update_sudo
   omarchy-update-aur-pkgs
   omarchy_security_revoke_sudo_timestamp
 

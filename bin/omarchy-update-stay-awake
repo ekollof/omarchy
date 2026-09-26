@@ -15,11 +15,17 @@ omarchy_security_require_privileged_bash_startup || exit 126
 set -e
 omarchy_security_sanitize_bash_environment "$0" "$@"
 omarchy_security_require_source_root "$0"
-# Traps first, so a signal or failure during the entry revocation still
-# exits through the cleanup path.
-omarchy_security_install_sudo_cleanup_traps
-omarchy_security_revoke_sudo_timestamp || exit 1
-omarchy_security_enable_no_update_sudo
+# sudo -N never writes a timestamp. A direct run still revokes on entry and
+# exit so it cannot leave one behind. omarchy-update owns the shared
+# timestamp and sets OMARCHY_UPDATE_OWNS_SUDO; sudo -k from this helper would
+# clear that authorization for every later phase.
+if [[ ${OMARCHY_UPDATE_OWNS_SUDO:-} == "1" ]]; then
+  omarchy_security_enable_no_update_sudo
+else
+  omarchy_security_install_sudo_cleanup_traps
+  omarchy_security_revoke_sudo_timestamp || exit 1
+  omarchy_security_enable_no_update_sudo
+fi
 
 stay_awake_state="$HOME/.local/state/omarchy/indicators/stay-awake"
 caller_uid=""
@@ -222,6 +228,9 @@ cleanup_pending_launch() {
   if ! rollback_pending_launch; then
     echo "Failed to roll back the pending Omarchy update sleep inhibitor." >&2
     (( status != 0 )) || status=1
+  fi
+  if [[ ${OMARCHY_UPDATE_OWNS_SUDO:-} == "1" ]]; then
+    exit "$status"
   fi
   omarchy_security_exit_with_revoked_sudo "$status" \
     "Failed to invalidate sudo credentials after the update sleep inhibitor."
@@ -557,7 +566,11 @@ start_locked() {
     fi
   fi
   launch_pending=0
-  omarchy_security_install_sudo_cleanup_traps
+  if [[ ${OMARCHY_UPDATE_OWNS_SUDO:-} == "1" ]]; then
+    trap - EXIT HUP INT TERM
+  else
+    omarchy_security_install_sudo_cleanup_traps
+  fi
 }
 
 case "${1:-}" in
