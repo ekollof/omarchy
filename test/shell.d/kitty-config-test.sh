@@ -153,6 +153,19 @@ run_command omarchy-font-set Font
 ! grep -q 'Old Font' "$kitty_config" || fail "no stale face survives a font change"
 pass "font command syncs explicit Kitty faces while preserving auto and comments"
 
+cat >"$kitty_config" <<'CONF'
+# font_family JetBrainsMono Nerd Font
+bold_font Old Font
+italic_font auto
+CONF
+run_command omarchy-font-set 'Test Font'
+grep -qx '# font_family JetBrainsMono Nerd Font' "$kitty_config" || fail "font command keeps a commented family line"
+grep -qx 'font_family Test Font' "$kitty_config" || fail "font command appends a family when only a comment exists"
+grep -qx 'bold_font Test Font' "$kitty_config" || fail "font command updates a stale face before font_family exists"
+grep -qx 'italic_font auto' "$kitty_config" || fail "font command leaves auto italic face alone without an active family"
+[[ $(grep -c '^font_family ' "$kitty_config") == "1" ]] || fail "first font set adds one active family line"
+pass "font command syncs faces when font_family is only commented out"
+
 cp "$ROOT/config/kitty/kitty.conf" "$kitty_config"
 run_command omarchy-font-set 'Test Font'
 ! grep -qE '^(bold_font|italic_font|bold_italic_font) ' "$kitty_config" || fail "font command must not add face lines users never set"
