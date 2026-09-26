@@ -77,6 +77,9 @@ if [[ ${1:-} == "-y" ]] || omarchy-update-confirm; then
   omarchy-snapshot create || (($? == 127)) ||
     echo -e "\e[33mContinuing the update without a snapshot.\e[0m" >&2
 
+  # The inhibitor authenticates with sudo -N. Tell it not to revoke: sudo -k
+  # is account-wide and would drop the timestamp prune and snapshot just made.
+  export OMARCHY_UPDATE_OWNS_SUDO=1
   omarchy-update-stay-awake start
 
   # Preserve the established development-checkout update ordering.
@@ -88,10 +91,13 @@ if [[ ${1:-} == "-y" ]] || omarchy-update-confirm; then
   # takes the update with it rather than migrating against what is still on disk.
   omarchy-update-system-pkgs
 
-  # Historical migrations are strictly ordered first-party repairs. They run on
-  # the cached timestamp from the package upgrade above; the credential only
-  # goes cold again before code outside that trust boundary can run.
-  omarchy-migrate
+  # Migrations can run mise or install hooks. Drop the timestamp from the
+  # package phases and force --no-update so a migration sudo authorizes one
+  # command and cannot publish a credential for orphan removal or restarts.
+  omarchy_security_revoke_sudo_timestamp
+  PATH="$OMARCHY_PATH/default/omarchy/sudo-no-update:$PATH" omarchy-migrate
+  omarchy_security_revoke_sudo_timestamp
+
   omarchy-update-orphan-pkgs
 
   omarchy-update-analyze-logs
