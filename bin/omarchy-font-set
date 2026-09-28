@@ -34,7 +34,15 @@ if [[ -f ~/.config/kitty/kitty.conf ]] || omarchy-cmd-present kitty; then
   mkdir -p ~/.config/kitty
   kitty_font_name=$(printf '%s' "$font_name" | sed 's/[\\&/]/\\&/g')
   if grep -qE '^[[:space:]]*font_family[[:space:]]+' ~/.config/kitty/kitty.conf 2>/dev/null; then
-    sed --follow-symlinks -i -E "s/^[[:space:]]*font_family[[:space:]]+.*/font_family $kitty_font_name/" ~/.config/kitty/kitty.conf
+    # A value split across a backslash continuation would otherwise keep its
+    # stale tail, which kitty joins onto the new family. Drop continuation
+    # lines whenever this key line is rewritten.
+    sed --follow-symlinks -i -E \
+      -e '/^[[:space:]]*font_family([[:space:]]|$)/{' \
+      -e ':join' \
+      -e '/\\$/{N;s/\\\n[[:space:]]*//;b join}' \
+      -e 's/^[[:space:]]*font_family[[:space:]]+.*/font_family '"$kitty_font_name"'/' \
+      -e '}' ~/.config/kitty/kitty.conf
   else
     printf '\nfont_family %s\n' "$font_name" >>~/.config/kitty/kitty.conf
   fi
@@ -43,9 +51,16 @@ if [[ -f ~/.config/kitty/kitty.conf ]] || omarchy-cmd-present kitty; then
   # leaves font_family commented out, so this has to run after both branches:
   # the first font set appends font_family and must still rewrite faces that
   # were already there. Point every non-auto face at the new family; `auto`
-  # (and absent lines) already derive from font_family on their own.
+  # (and absent lines) already derive from font_family on their own. As with
+  # font_family above, drop backslash continuations of rewritten face lines.
   for face in bold_font italic_font bold_italic_font; do
-    sed --follow-symlinks -i -E "/^[[:space:]]*$face[[:space:]]+auto([[:space:]]|$)/!s/^[[:space:]]*$face[[:space:]]+.*/$face $kitty_font_name/" ~/.config/kitty/kitty.conf
+    sed --follow-symlinks -i -E \
+      -e '/^[[:space:]]*'"$face"'([[:space:]]|$)/{' \
+      -e '/^[[:space:]]*'"$face"'[[:space:]]+auto([[:space:]]|$)/b' \
+      -e ':join' \
+      -e '/\\$/{N;s/\\\n[[:space:]]*//;b join}' \
+      -e 's/^[[:space:]]*'"$face"'[[:space:]]+.*/'"$face $kitty_font_name"'/' \
+      -e '}' ~/.config/kitty/kitty.conf
   done
   pkill -USR1 kitty
 fi
