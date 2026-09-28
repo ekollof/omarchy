@@ -166,6 +166,29 @@ grep -qx 'italic_font auto' "$kitty_config" || fail "font command leaves auto it
 [[ $(grep -c '^font_family ' "$kitty_config") == "1" ]] || fail "first font set adds one active family line"
 pass "font command syncs faces when font_family is only commented out"
 
+cat >"$kitty_config" <<'CONF'
+font_family Old Font \
+  style=Regular
+bold_font family="Old Font" \
+  style=Heavy
+italic_font auto \
+  still-auto
+bold_italic_font Old Font \
+  style=Bold \
+  extra=Tail
+# italic_font Manual Edit \
+  not-a-face
+CONF
+run_command omarchy-font-set 'Test Font'
+grep -qx 'font_family Test Font' "$kitty_config" || fail "font command drops a continued family line's stale tail"
+grep -qx 'bold_font Test Font' "$kitty_config" || fail "font command drops a continued face line's stale tail"
+grep -qx 'bold_italic_font Test Font' "$kitty_config" || fail "font command drops multi-level continuations of a face line"
+! grep -q 'style=\|extra=Tail\|Old Font' "$kitty_config" || fail "no continuation tail survives a font change"
+grep -qx 'italic_font auto \\' "$kitty_config" || fail "font command leaves a continued auto face alone"
+grep -qx '  still-auto' "$kitty_config" || fail "font command keeps an auto face's continuation"
+grep -qx '# italic_font Manual Edit \\' "$kitty_config" || fail "font command leaves a continued commented face alone"
+pass "font command drops backslash continuations of rewritten Kitty lines"
+
 cp "$ROOT/config/kitty/kitty.conf" "$kitty_config"
 run_command omarchy-font-set 'Test Font'
 ! grep -qE '^(bold_font|italic_font|bold_italic_font) ' "$kitty_config" || fail "font command must not add face lines users never set"
