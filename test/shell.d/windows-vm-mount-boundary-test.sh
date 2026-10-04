@@ -226,8 +226,8 @@ umount "$EXPECTED_STORAGE"
 chmod 2777 /home/shared-target
 chmod 6755 /home/storage-target
 with_vm_lock prepare_caller_mounts || fail "root could not rebind setgid sources"
-[[ $(command stat -Lc '%u:%a' "$EXPECTED_STORAGE") == 1000:700 &&
-  $(command stat -Lc '%u:%a' "$EXPECTED_SHARED") == 1000:700 ]] || fail "setgid sources were not hardened to 0700"
+[[ $(command stat -Lc '%u:%a' "$EXPECTED_STORAGE") == ${TEST_UID}:700 &&
+  $(command stat -Lc '%u:%a' "$EXPECTED_SHARED") == ${TEST_UID}:700 ]] || fail "setgid sources were not hardened to 0700"
 mounts_ready || fail "final guard rejected rebound setgid sources"
 pass "hardening clears the setuid/setgid bits a numeric chmod keeps on directories"
 
