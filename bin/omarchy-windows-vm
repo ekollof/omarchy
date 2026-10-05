@@ -616,15 +616,21 @@ restore_all_shared_privacy() {
   done
 }
 
-# Positive evidence first: a successful inspect reporting anything but a live
-# container (running, restarting, or created — a flip may still come) means
-# no later samba start can flip the share again. A failed probe reads as
-# gone too: the anchors assume a local daemon, which a down daemon cannot be
-# flipping through — and only a success keeps the wait alive.
+# Whether the VM container is gone, so no later samba start can flip the
+# share again. Only positive evidence ends the wait: a successful inspect
+# reporting anything but a live container (running, restarting, or created —
+# a flip may still come), or a probe that positively reports no such
+# container. Anything else — a permission-denied inspect on a default
+# install whose daemon is root-owned, an unreachable daemon — keeps watching:
+# exiting past a flip that may still come would reopen the hole, while a
+# lingering watcher is merely untidy.
 container_gone() {
-  local status
-  status=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>/dev/null) || return 0
-  if [[ $status == "running" || $status == "restarting" || $status == "created" ]]; then
+  local probe
+  probe=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>&1) || {
+    [[ $probe == *"No such object"* || $probe == *"No such container"* ]] && return 0
+    return 1
+  }
+  if [[ $probe == "running" || $probe == "restarting" || $probe == "created" ]]; then
     return 1
   else
     return 0
