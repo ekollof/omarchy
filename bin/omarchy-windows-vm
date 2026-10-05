@@ -616,15 +616,33 @@ restore_all_shared_privacy() {
   done
 }
 
+# Positive evidence first: a successful inspect reporting anything but a live
+# container (running, restarting, or created — a flip may still come) means
+# no later samba start can flip the share again. A failed probe reads as
+# gone too: the anchors assume a local daemon, which a down daemon cannot be
+# flipping through — and only a success keeps the wait alive.
+container_gone() {
+  local status
+  status=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>/dev/null) || return 0
+  if [[ $status == "running" || $status == "restarting" || $status == "created" ]]; then
+    return 1
+  else
+    return 0
+  fi
+}
+
 # Unprivileged: samba.sh runs only after dockur's ISO download (10-15 minutes
 # on a fresh install). Do not hold a polkit session open for that. Watch the
 # caller's own share and chmod it as the owner once it becomes 2777.
 watch_share_privacy() {
   local dir="$1" i mode result
   [[ -e $dir ]] || return 0
-  # 2x the documented 10-15 minute download is a thin margin on a slow link,
-  # so budget an hour; on expiry restore only if the share is still exposed.
-  for i in {1..3600}; do
+  # Twice the documented download is a thin margin on a slow link, so budget
+  # hours rather than minutes — and stop depending on the clock alone. A
+  # download slower than any fixed budget would outlast the watcher while
+  # samba can still flip the share later, so leave only once the share is
+  # fixed, the container is gone, or the budget ends.
+  for i in {1..21600}; do
     mode=$(stat -Lc '%a' "$dir" 2>/dev/null) || mode=""
     if [[ $mode == 2777 || $mode == 777 ]]; then
       chmod_private_dir "$dir" 2>/dev/null || true
@@ -632,6 +650,9 @@ watch_share_privacy() {
       # an unwritable moment) must not end the watcher permanently while the
       # share is still exposed. Leave only once the mode is really 700.
       [[ $(stat -Lc '%a' "$dir" 2>/dev/null) == 700 ]] && return 0
+    fi
+    if ((i % 60 == 0)) && container_gone; then
+      break
     fi
     sleep 1
   done
@@ -641,7 +662,7 @@ watch_share_privacy() {
   fi
   result=$(stat -Lc '%a' "$dir" 2>/dev/null) || result="missing"
   logger -t omarchy-windows-vm \
-    "share privacy watcher timed out; $dir mode is $result" 2>/dev/null || true
+    "share privacy watcher exiting; $dir mode is $result" 2>/dev/null || true
 }
 
 schedule_share_privacy_restore() {
@@ -652,14 +673,20 @@ schedule_share_privacy_restore() {
   # which is a uwsm-app systemd scope. Dismissing that window SIGTERMs leftover
   # cgroup members; trap '' HUP does not cover that. A user unit is outside
   # the scope, so the wait survives the terminal.
+  # Sourcing this file runs the dispatcher, so take the harmless help branch
+  # the way the shell tests do when sourcing it.
   if omarchy-cmd-present systemd-run; then
     systemctl --user reset-failed omarchy-windows-share-privacy.service 2>/dev/null || true
     systemctl --user stop omarchy-windows-share-privacy.service 2>/dev/null || true
+    # Stash the service arguments first: `set -- help` would otherwise
+    # clobber them, sourcing "help" instead of the helper and starting the
+    # watcher with an empty directory (silently watching nothing while the
+    # successful unit launch skips the fallback below).
     if systemd-run --user --quiet --collect \
       --unit=omarchy-windows-share-privacy \
       --description="Restore ~/Windows mode after dockur samba.sh" \
-      /bin/bash -c 'set -- help; source "$1" >/dev/null; watch_share_privacy "$2"' \
-      bash "$self" "$dir"; then
+      /bin/bash -c 'helper=$1; dir=$2; set -- help; source "$helper" >/dev/null; watch_share_privacy "$dir"' \
+      watcher "$self" "$dir"; then
       return 0
     fi
   fi
@@ -1551,6 +1578,11 @@ launch_windows() {
 
   echo "Starting Windows VM (this may prompt for authorization)..."
   if ! priv up_wait; then
+    # The container may still be coming up in the background (slow download,
+    # slow guest): the one-shot priv-side restore in up_wait cannot cover a
+    # samba flip that lands after this failure, so arm the owner-side watcher
+    # for it before reporting.
+    schedule_share_privacy_restore
     echo "❌ Failed to start Windows VM!"
     echo "   Try checking: omarchy-windows-vm status"
     omarchy-notification-send -u critical "Windows VM" "Failed to start Windows VM"
