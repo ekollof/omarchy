@@ -266,6 +266,49 @@ EOF
 )
 pass "the share watcher leaves once the container is gone"
 
+# Domain logon identity. The join-account check compares the UPN suffix
+# against DOMAIN case-insensitively (DNS names are), and the launcher
+# derives its transport/Kerberos domain from a stored DOMAIN, the readable
+# compose, a UPN login, or a NetBIOS login — an inside-Windows join leaves
+# no DOMAIN anywhere, but its NetBIOS login still needs the TLS transport.
+(
+  test_home=$(mktemp -d)
+  trap 'rm -rf "$test_home"' EXIT
+  mkdir -p "$test_home/runtime"
+  HOME=$test_home
+  OMARCHY_WINDOWS_DIR=$test_home/runtime
+  export HOME OMARCHY_WINDOWS_DIR
+  set -- help
+  source "$windows_vm_command" >/dev/null
+  valid_join_account "admin@corp.example.com" || fail "a matching UPN join account is rejected"
+  valid_join_account "admin@CORP.EXAMPLE.COM" || fail "an uppercase UPN suffix is rejected against a lowercase DOMAIN"
+  domain_suffix_matches "CORP.EXAMPLE.COM" "corp.example.com" ||
+    fail "a case-mismatched suffix does not match"
+  domain_suffix_matches "corp.example.com" "corp.example.com" ||
+    fail "an identical suffix does not match"
+  domain_suffix_matches "other.example.com" "corp.example.com" &&
+    fail "a mismatched suffix matches"
+  valid_rdp_username 'CORP\alice' || fail "a NetBIOS login is rejected"
+  write_credentials alice secret corp.example.com || fail "write_credentials failed"
+  [[ $(resolve_rdp_domain) == "corp.example.com" ]] ||
+    fail "the stored DOMAIN does not win: $(resolve_rdp_domain)"
+  write_credentials alice secret "" || fail "write_credentials failed"
+  printf '      DOMAIN: "compose.example.com"\n' >"$test_home/runtime/docker-compose.yml"
+  [[ $(resolve_rdp_domain) == "compose.example.com" ]] ||
+    fail "the compose DOMAIN is not the fallback: $(resolve_rdp_domain)"
+  rm -f "$test_home/runtime/docker-compose.yml"
+  write_credentials alice@corp.example.com secret "" || fail "write_credentials failed"
+  [[ $(resolve_rdp_domain) == "corp.example.com" ]] ||
+    fail "a UPN login does not name its realm: $(resolve_rdp_domain)"
+  write_credentials 'CORP\alice' secret "" || fail "write_credentials failed"
+  [[ $(resolve_rdp_domain) == "CORP" ]] ||
+    fail "a NetBIOS login does not select the domain transport: $(resolve_rdp_domain)"
+  write_credentials alice secret "" || fail "write_credentials failed"
+  [[ -z $(resolve_rdp_domain) ]] ||
+    fail "a local login resolves a domain: $(resolve_rdp_domain)"
+)
+pass "domain logon resolves its transport domain from every login form"
+
 # pkexec runs the packaged copy, which a dev link cannot shadow. A stale
 # packaged copy used to re-apply the pre-fix chmod semantics with no diagnostic,
 # failing a launch and leaving the share at 2700. The skew check must refuse
