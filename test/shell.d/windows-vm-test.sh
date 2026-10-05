@@ -111,6 +111,140 @@ EOF
 )
 pass "the install share watcher outlives the terminal install ran in"
 
+# The user unit used to source "help" instead of the helper (`set -- help`
+# clobbered the service arguments), so the watcher silently never started
+# while the successful unit launch skipped the fallback entirely. A stub that
+# runs the service command the way a successful start would must leave a 2777
+# share at 700 — the broken wiring leaves it exposed.
+(
+  test_home=$(mktemp -d)
+  trap 'rm -rf "$test_home"' EXIT
+  mkdir -p "$test_home/Windows" "$test_home/bin"
+  chmod 2777 "$test_home/Windows"
+  cat >"$test_home/bin/systemd-run" <<'EOF'
+#!/bin/bash
+printf 'systemd-run' >>"$TEST_LOG"
+printf '\t%s' "$@" >>"$TEST_LOG"
+printf '\n' >>"$TEST_LOG"
+# Simulate a successful transient unit start by running the service command.
+while [[ $# -gt 0 && $1 != /bin/bash ]]; do shift; done
+[[ $1 == /bin/bash ]] || exit 1
+exec "$@"
+EOF
+  chmod +x "$test_home/bin/systemd-run"
+  cat >"$test_home/schedule.sh" <<EOF
+export HOME=$test_home
+export PATH=$test_home/bin:\$PATH
+export TEST_LOG=$test_home/systemd-run.log
+: >"\$TEST_LOG"
+set -- help
+source "$windows_vm_command" >/dev/null
+schedule_share_privacy_restore
+EOF
+  bash "$test_home/schedule.sh" || fail "the systemd share watcher failed to start"
+  grep -q 'omarchy-windows-share-privacy' "$test_home/systemd-run.log" ||
+    fail "the share watcher did not start as a user unit"
+  [[ $(stat -Lc '%a' "$test_home/Windows") == 700 ]] ||
+    fail "the systemd share watcher left the share at $(stat -Lc '%a' "$test_home/Windows")"
+)
+pass "the systemd share watcher starts and hardens the share"
+
+# A launch that fails (up_wait timeout, slow guest) leaves the container
+# coming up in the background: the one-shot priv-side restore cannot cover a
+# samba flip that lands after the failure, so the failure path must arm the
+# owner-side watcher before reporting.
+(
+  test_home=$(mktemp -d)
+  trap 'rm -rf "$test_home"' EXIT
+  mkdir -p "$test_home/runtime" "$test_home/Windows"
+  touch "$test_home/runtime/docker-compose.yml"
+  chmod 700 "$test_home/Windows"
+  HOME=$test_home
+  OMARCHY_WINDOWS_DIR=$test_home/runtime
+  export HOME OMARCHY_WINDOWS_DIR
+  set -- help
+  source "$windows_vm_command" >/dev/null
+  read_credential() { return 1; }
+  priv() { return 1; }
+  omarchy-notification-send() { return 0; }
+  schedule_share_privacy_restore() { : >"$test_home/scheduled"; }
+  if ( launch_windows "" ); then
+    fail "launch_windows succeeded with a failing up_wait"
+  fi
+  [[ -e $test_home/scheduled ]] || fail "a failed launch did not arm the share watcher"
+)
+pass "a failed launch arms the share privacy watcher"
+
+# The watcher must outlive a slow download: a flip that lands after minutes
+# of private share still gets fixed while the container runs.
+(
+  test_home=$(mktemp -d)
+  trap 'rm -rf "$test_home"' EXIT
+  mkdir -p "$test_home/Windows"
+  chmod 700 "$test_home/Windows"
+  HOME=$test_home
+  export HOME
+  set -- help
+  source "$windows_vm_command" >/dev/null
+  docker() { echo "running"; return 0; }
+  ( sleep 2; chmod 2777 "$test_home/Windows" ) &
+  flipper=$!
+  watch_share_privacy "$test_home/Windows" & watcher=$!
+  # Bounded wait: the fix lands seconds after the flip; a broken watcher
+  # would sit on the loop until its hour budget instead.
+  for _ in {1..40}; do
+    kill -0 $watcher 2>/dev/null || break
+    sleep 0.5
+  done
+  if kill -0 $watcher 2>/dev/null; then
+    kill "$watcher" 2>/dev/null || true
+    wait "$watcher" 2>/dev/null || true
+    fail "the watcher did not fix a flip that landed while watching"
+  fi
+  wait "$watcher" 2>/dev/null || true
+  wait "$flipper" 2>/dev/null || true
+  [[ $(stat -Lc '%a' "$test_home/Windows") == 700 ]] ||
+    fail "a late flip left the share at $(stat -Lc '%a' "$test_home/Windows")"
+)
+pass "the share watcher fixes a flip that lands while watching"
+
+# …but it must not watch forever: once the container is gone nothing can flip
+# the share again, so the wait ends instead of sitting out its whole budget.
+# (Only a successful inspect reporting a live container keeps it alive.)
+(
+  test_home=$(mktemp -d)
+  trap 'rm -rf "$test_home"' EXIT
+  mkdir -p "$test_home/Windows"
+  chmod 700 "$test_home/Windows"
+  HOME=$test_home
+  export HOME
+  set -- help
+  source "$windows_vm_command" >/dev/null
+  cat >"$test_home/watch.sh" <<EOF
+export HOME=$test_home
+set -- help
+source "$windows_vm_command" >/dev/null
+sleep() { :; }
+docker() { return 1; }
+watch_share_privacy "\$HOME/Windows"
+EOF
+  timeout 120 bash "$test_home/watch.sh" ||
+    fail "the watcher outlived a gone container"
+  [[ $(stat -Lc '%a' "$test_home/Windows") == 700 ]] ||
+    fail "the watcher exit left the share at $(stat -Lc '%a' "$test_home/Windows")"
+  docker() { return 1; }
+  container_gone || fail "a missing container does not read as gone"
+  docker() { echo "running"; return 0; }
+  if container_gone; then
+    fail "a running container reads as gone"
+  fi
+  docker() { echo "restarting"; return 0; }
+  if container_gone; then
+    fail "a restarting container reads as gone"
+  fi
+)
+pass "the share watcher leaves once the container is gone"
+
 # pkexec runs the packaged copy, which a dev link cannot shadow. A stale
 # packaged copy used to re-apply the pre-fix chmod semantics with no diagnostic,
 # failing a launch and leaving the share at 2700. The skew check must refuse
