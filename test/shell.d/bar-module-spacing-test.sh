@@ -13,7 +13,7 @@ gutter_count=$(rg -c 'spacing: 0' "$ROOT/shell/plugins/bar/Bar.qml" || true)
 [[ $gutter_count == "2" ]] || fail "bar module lists leave spacing to the slots" "spacing: 0 occurrences: $gutter_count"
 pass "bar module lists leave spacing to the slots"
 
-for anchor in 'paintHalfGap' 'paintIntrude' 'slotPad' 'paintedExtent' 'paintChild' 'paintItem' 'labelTightWidth' 'iconContentItem' 'BarModel\.slotPad\(' 'BarModel\.paintChild\(activeItem\)' 'omarchy\.spacer'; do
+for anchor in 'paintHalfGap' 'paintIntrude' 'slotPad' 'paintedExtent' 'paintChild' 'paintItem' 'labelTightWidth' 'labelTightHeight' 'glyphPaintedHeight' 'iconContentItem' 'vectorPaintedExtent' 'targetInSlot' 'BarModel\.slotPad\(' 'BarModel\.paintChild\(activeItem\)' 'BarModel\.paintedExtent\(' 'BarModel\.targetInSlot\(target, slot\)' 'omarchy\.spacer'; do
   rg -q "$anchor" "$ROOT/shell/plugins/bar/Bar.qml" || fail "bar normalizes slot spacing from painted widths" "$anchor"
 done
 pass "bar normalizes slot spacing from painted widths"
@@ -71,6 +71,68 @@ assertEqual(bar.paintChild({ children: [service] }), null, 'a root without metri
 assertEqual(bar.paintChild(null), null, 'a missing widget measures nothing')
 assertEqual(bar.hasPaintMetrics(button), true, 'glyph paint is a metric')
 assertEqual(bar.hasPaintMetrics(service), false, 'service objects carry no metrics')
+
+// Vector icon content arrives as-is from its panel: tailscale and dropbox
+// center the real icon in a bare Item wrapper with no implicit size, so the
+// bar must measure through the wrapper instead of falling back to the
+// full canvas.
+assertDeepEqual(bar.vectorPaintedExtent(null), { width: 0, height: 0 }, 'missing vector content measures nothing')
+assertDeepEqual(bar.vectorPaintedExtent({ implicitWidth: 12, implicitHeight: 12 }), { width: 12, height: 12 }, 'a directly sized icon measures itself')
+assertDeepEqual(
+  bar.vectorPaintedExtent({ children: [{ implicitWidth: 11, implicitHeight: 11 }] }),
+  { width: 11, height: 11 },
+  'a tailscale-style wrapper measures its icon, not the canvas'
+)
+assertDeepEqual(
+  bar.vectorPaintedExtent({ children: [{ implicitWidth: 14.16, implicitHeight: 12 }] }),
+  { width: 14.16, height: 12 },
+  'a dropbox-style wrapper keeps its aspect'
+)
+assertDeepEqual(
+  bar.vectorPaintedExtent({ children: [service, { implicitWidth: 11, implicitHeight: 11 }] }),
+  { width: 11, height: 11 },
+  'non-visual wrapper children drop out'
+)
+assertDeepEqual(
+  bar.vectorPaintedExtent({ children: [{ children: [{ children: [{ children: [{ implicitWidth: 11, implicitHeight: 11 }] }] }] }] }),
+  { width: 0, height: 0 },
+  'the wrapper scan stays shallow'
+)
+
+// The painted-extent decision tree the slot delegates to: every branch,
+// both axes.
+assertEqual(bar.paintedExtent({ vertical: false, glyphPaintedWidth: 11, contentWidth: 27 }), 11, 'a glyph measures its paint')
+assertEqual(bar.paintedExtent({ vertical: false, labelTightWidth: 13, labelWidth: 16, contentWidth: 30 }), 13, 'tight label ink wins over advance')
+assertEqual(bar.paintedExtent({ vertical: false, labelWidth: 40, contentWidth: 52 }), 40, 'a custom label measures its advance')
+assertEqual(bar.paintedExtent({ vertical: false, vectorWidth: 12, vectorHeight: 12, opticalSize: 16, contentWidth: 27 }), 12, 'a vector icon measures under the canvas')
+assertEqual(bar.paintedExtent({ vertical: false, vectorWidth: 11, vectorHeight: 11, opticalSize: 16, contentWidth: 27 }), 11, 'a wrapped vector icon keeps its mark, not the canvas')
+assertEqual(bar.paintedExtent({ vertical: false, vectorWidth: 24, vectorHeight: 24, opticalSize: 16, contentWidth: 27 }), 16, 'an over-reporting vector caps at the canvas')
+assertEqual(bar.paintedExtent({ vertical: false, vectorWidth: 12, vectorHeight: 12, contentWidth: 27 }), 12, 'a vector without canvas measures itself')
+assertEqual(bar.paintedExtent({ vertical: false, opticalSize: 16, contentWidth: 27 }), 16, 'an unmeasurable icon falls back to the canvas')
+assertEqual(bar.paintedExtent({ vertical: false, contentWidth: 27 }), 27, 'an opaque custom falls back to full-bleed')
+assertEqual(bar.paintedExtent(null), 0, 'a missing snapshot measures nothing')
+assertEqual(bar.paintedExtent({ vertical: true, glyphPaintedHeight: 12, opticalSize: 16, contentHeight: 27 }), 12, 'a vertical glyph measures its ink, not the canvas')
+assertEqual(bar.paintedExtent({ vertical: true, labelTightHeight: 20, contentHeight: 34 }), 20, 'a vertical label measures its ink, not the slot')
+assertEqual(bar.paintedExtent({ vertical: true, vectorWidth: 11, vectorHeight: 11, opticalSize: 16, contentHeight: 27 }), 11, 'a vertical vector measures its mark')
+assertEqual(bar.paintedExtent({ vertical: true, vectorWidth: 24, vectorHeight: 24, opticalSize: 16, contentHeight: 27 }), 16, 'a vertical over-report caps at the canvas')
+assertEqual(bar.paintedExtent({ vertical: true, opticalSize: 16, contentHeight: 27 }), 16, 'a vertical icon without ink metrics keeps the canvas')
+assertEqual(bar.paintedExtent({ vertical: true, contentHeight: 27 }), 27, 'a vertical opaque custom falls back to full-bleed')
+
+// Clicks resolve per slot: only the slot's own targets compete, so a
+// neighbour's button overlapping a negatively padded edge cannot steal
+// the press; the slot falls back to its own active item instead.
+const slotA = { activeItem: { id: 'a' } }
+const buttonA = { parent: slotA.activeItem }
+const nestedA = { parent: buttonA }
+const slotB = { activeItem: { id: 'b' } }
+const buttonB = { parent: slotB.activeItem }
+assertEqual(bar.targetInSlot(buttonA, slotA), true, 'a slot button belongs to its slot')
+assertEqual(bar.targetInSlot(nestedA, slotA), true, 'a nested target belongs to its slot')
+assertEqual(bar.targetInSlot(slotA.activeItem, slotA), true, 'an active item belongs to its slot')
+assertEqual(bar.targetInSlot(buttonB, slotA), false, 'a neighbour button does not belong to this slot')
+assertEqual(bar.targetInSlot(buttonA, slotB), false, 'scoping is per slot, not global')
+assertEqual(bar.targetInSlot(null, slotA), false, 'a missing target belongs nowhere')
+assertEqual(bar.targetInSlot(buttonA, null), false, 'a target without a slot belongs nowhere')
 JS
 
 if ! command -v quickshell >/dev/null 2>&1; then
@@ -88,12 +150,14 @@ trap 'rm -rf "$test_tmp"' EXIT
 
 ln -s "$ROOT/shell/Ui" "$test_tmp/Ui"
 ln -s "$ROOT/shell/Commons" "$test_tmp/Commons"
+ln -s "$ROOT/shell/plugins/bar/BarModel.js" "$test_tmp/BarModel.js"
 
 cat >"$test_tmp/shell.qml" <<'QML'
 import QtQuick
 import Quickshell
 import qs.Commons
 import qs.Ui
+import "BarModel.js" as BarModel
 
 ShellRoot {
   id: root
@@ -101,6 +165,14 @@ ShellRoot {
   function fail(message) {
     console.log("RESULT fail " + message)
     Qt.quit()
+  }
+
+  // The slot geometry identity the bar relies on: pad + own bearing on one
+  // side always sums to the uniform half gap, whatever the widget paints.
+  function gapHolds(span, painted) {
+    var half = Style.space(6)
+    var bearing = (span - painted) / 2
+    return Math.abs(BarModel.slotPad(span, painted, half, Style.space(4)) + bearing - half) < 0.01
   }
 
   Component.onCompleted: Qt.callLater(function() {
@@ -151,6 +223,98 @@ ShellRoot {
         fail("vector icon content is not measurable through the button")
         return
       }
+      // Tailscale/dropbox panels wrap the real icon in a bare Item with no
+      // implicit size: the slot must measure through the wrapper to the
+      // ~11px mark, not fall back to the 16px canvas.
+      var wrappedSize = BarModel.vectorPaintedExtent(wrapped.iconContentItem)
+      if (!(wrappedSize.width === 11 && wrappedSize.height === 11)) {
+        fail("wrapped vector icon is not measured through its wrapper")
+        return
+      }
+      var wrappedPainted = BarModel.paintedExtent({
+        vertical: false,
+        vectorWidth: wrappedSize.width,
+        vectorHeight: wrappedSize.height,
+        opticalSize: wrapped.opticalSize,
+        contentWidth: wrapped.implicitWidth
+      })
+      if (wrappedPainted !== 11) {
+        fail("wrapped vector extent is not the icon mark")
+        return
+      }
+      if (!(wrappedPainted < wrapped.opticalSize)) {
+        fail("wrapped vector extent falls back to the canvas")
+        return
+      }
+      // Slot-level check on rendered buttons: pad + own bearing lands on
+      // the uniform half gap for every horizontal paint kind.
+      var glyphPainted = BarModel.paintedExtent({ vertical: false, glyphPaintedWidth: glyph.glyphPaintedWidth, contentWidth: glyph.implicitWidth })
+      var pillPainted = BarModel.paintedExtent({ vertical: false, labelTightWidth: pill.labelTightWidth, labelWidth: pill.labelWidth, contentWidth: pill.implicitWidth })
+      var vectorPainted = BarModel.paintedExtent({ vertical: false, vectorWidth: 12, vectorHeight: 12, opticalSize: vector.opticalSize, contentWidth: vector.implicitWidth })
+      if (!gapHolds(glyph.implicitWidth, glyphPainted)) {
+        fail("icon slot does not land on the uniform gap")
+        return
+      }
+      if (!gapHolds(pill.implicitWidth, pillPainted)) {
+        fail("pill slot does not land on the uniform gap")
+        return
+      }
+      if (!gapHolds(vector.implicitWidth, vectorPainted)) {
+        fail("vector slot does not land on the uniform gap")
+        return
+      }
+      if (!gapHolds(wrapped.implicitWidth, wrappedPainted)) {
+        fail("wrapped vector slot does not land on the uniform gap")
+        return
+      }
+      // Vertical bar: tight ink heights, not the canvas or the full slot.
+      var glyphVPainted = BarModel.paintedExtent({ vertical: true, glyphPaintedHeight: glyphV.glyphPaintedHeight, opticalSize: glyphV.opticalSize, contentHeight: glyphV.implicitHeight })
+      if (!(glyphV.glyphPaintedHeight > 0 && glyphVPainted === glyphV.glyphPaintedHeight)) {
+        fail("vertical icon paint height is not measured")
+        return
+      }
+      if (!(glyphVPainted < glyphV.opticalSize)) {
+        fail("vertical icon extent falls back to the canvas")
+        return
+      }
+      var pillVPainted = BarModel.paintedExtent({ vertical: true, labelTightHeight: pillV.labelTightHeight, contentHeight: pillV.implicitHeight })
+      if (!(pillV.labelTightHeight > 0 && pillVPainted === pillV.labelTightHeight)) {
+        fail("vertical label paint height is not measured")
+        return
+      }
+      // Multi-line stacks cannot tighten (TextMetrics bounds do not span
+      // lines), so they keep the full-bleed fallback instead of collapsing.
+      if (!(pillVStack.labelTightHeight === 0)) {
+        fail("stacked label pretends to a tight height")
+        return
+      }
+      var stackPainted = BarModel.paintedExtent({ vertical: true, labelTightHeight: pillVStack.labelTightHeight, contentHeight: pillVStack.implicitHeight })
+      if (!(stackPainted === pillVStack.implicitHeight)) {
+        fail("stacked label does not keep full-bleed")
+        return
+      }
+      var vectorVSize = BarModel.vectorPaintedExtent(vectorV.iconContentItem)
+      var vectorVPainted = BarModel.paintedExtent({ vertical: true, vectorWidth: vectorVSize.width, vectorHeight: vectorVSize.height, opticalSize: vectorV.opticalSize, contentHeight: vectorV.implicitHeight })
+      if (!(vectorVPainted === 11)) {
+        fail("vertical vector extent is not the icon mark")
+        return
+      }
+      if (!gapHolds(glyphV.implicitHeight, glyphVPainted)) {
+        fail("vertical icon slot does not land on the uniform gap")
+        return
+      }
+      if (!gapHolds(pillV.implicitHeight, pillVPainted)) {
+        fail("vertical label slot does not land on the uniform gap")
+        return
+      }
+      if (!gapHolds(pillVStack.implicitHeight, stackPainted)) {
+        fail("stacked label slot does not land on the uniform gap")
+        return
+      }
+      if (!gapHolds(vectorV.implicitHeight, vectorVPainted)) {
+        fail("vertical vector slot does not land on the uniform gap")
+        return
+      }
       console.log("RESULT pass")
       Qt.quit()
     }
@@ -160,6 +324,20 @@ ShellRoot {
     id: testBar
     property bool vertical: false
     property int barSize: Style.bar.sizeHorizontal
+    property string fontFamily: Style.font.family
+    property color barForeground: "white"
+    property color urgent: "red"
+    property bool foregroundAnimationEnabled: false
+    function registerClickTarget(target) {}
+    function unregisterClickTarget(target) {}
+    function hideTooltip(target) {}
+    function showTooltip(target, text) {}
+  }
+
+  QtObject {
+    id: testBarV
+    property bool vertical: true
+    property int barSize: Style.bar.sizeVertical
     property string fontFamily: Style.font.family
     property color barForeground: "white"
     property color urgent: "red"
@@ -184,6 +362,27 @@ ShellRoot {
         bar: testBar
         iconComponent: Component {
           Rectangle { implicitWidth: 12; implicitHeight: 12 }
+        }
+      }
+      // Tailscale/dropbox shape: the real icon centered in a bare Item
+      // wrapper with no implicit size of its own.
+      BarIconButton {
+        id: wrapped
+        bar: testBar
+        iconComponent: Component {
+          Item {
+            Rectangle { anchors.centerIn: parent; implicitWidth: 11; implicitHeight: 11 }
+          }
+        }
+      }
+      BarIconButton { id: glyphV; bar: testBarV; text: "x" }
+      WidgetButton { id: pillV; bar: testBarV; text: "AB" }
+      WidgetButton { id: pillVStack; bar: testBarV; text: "A\nB" }
+      BarIconButton {
+        id: vectorV
+        bar: testBarV
+        iconComponent: Component {
+          Rectangle { implicitWidth: 11; implicitHeight: 11 }
         }
       }
     }
