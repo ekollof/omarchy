@@ -205,6 +205,12 @@ valid_join_account() {
   valid_username "$account"
 }
 
+# DNS names are case-insensitive: a UPN suffix matches DOMAIN regardless of
+# case, so admin@CORP.EXAMPLE.COM joins corp.example.com.
+domain_suffix_matches() {
+  [[ ${1,,} == "${2,,}" ]]
+}
+
 # What launch hands FreeRDP: a bare local name, DOMAIN\user (NetBIOS form),
 # or user@domain. Accepting more than the join account is intentional -- the
 # credentials subcommand may target a local VM or a NetBIOS domain.
@@ -1039,7 +1045,7 @@ __priv_write_compose() {
       echo "the join password must not stay at its default value when joining a domain" >&2
       exit 2
     }
-    if [[ $username == *@* && ${username#*@} != "${domain,,}" ]]; then
+    if [[ $username == *@* ]] && ! domain_suffix_matches "${username#*@}" "$domain"; then
       echo "the domain in the join account must match DOMAIN: $domain" >&2
       exit 2
     fi
@@ -1416,6 +1422,29 @@ read_credential() {
     }
   done <"$CREDENTIALS_FILE"
   return 1
+}
+
+# The domain FreeRDP and Kerberos use: the stored DOMAIN, then the compose
+# DOMAIN when readable, then the realm named by a domain login itself — UPN
+# (user@domain) or NetBIOS (DOMAIN\user). A VM joined from inside Windows
+# has no DOMAIN anywhere, but its NetBIOS login still needs the TLS
+# transport. A bare NetBIOS name cannot map to DNS for Kerberos, but that
+# file only matters for NLA, which a domain login never selects.
+resolve_rdp_domain() {
+  local domain user
+  domain=$(read_credential DOMAIN 2>/dev/null) || domain=""
+  if [[ -z $domain && -r $COMPOSE_FILE ]]; then
+    domain=$(read_compose_value DOMAIN "$COMPOSE_FILE")
+  fi
+  if [[ -z $domain ]]; then
+    user=$(read_credential USERNAME 2>/dev/null) || user=""
+    if [[ $user == *@* ]]; then
+      domain="${user##*@}"
+    elif [[ $user == *\\* ]]; then
+      domain="${user%%\\*}"
+    fi
+  fi
+  printf '%s\n' "$domain"
 }
 
 # Build the Kerberos config FreeRDP is pointed at through KRB5_CONFIG. FreeRDP
@@ -1949,14 +1978,7 @@ To stop: omarchy-windows-vm stop"
   # falling back to the compose only when that is readable (sudoless mode).
   # Credentials written before the domain line existed are covered by a UPN
   # login, which names its own realm.
-  WIN_DOMAIN=$(read_credential DOMAIN 2>/dev/null) || WIN_DOMAIN=""
-  if [[ -z $WIN_DOMAIN && -r $COMPOSE_FILE ]]; then
-    WIN_DOMAIN=$(read_compose_value DOMAIN "$COMPOSE_FILE")
-  fi
-  if [[ -z $WIN_DOMAIN ]]; then
-    local_win_user=$(read_credential USERNAME 2>/dev/null) || local_win_user=""
-    [[ $local_win_user == *@* ]] && WIN_DOMAIN="${local_win_user##*@}"
-  fi
+  WIN_DOMAIN=$(resolve_rdp_domain)
   KRB5_CONF="$HOME/.config/windows/krb5.conf"
   write_krb5_conf "$KRB5_CONF" "$WIN_DOMAIN"
   export KRB5_CONFIG="$KRB5_CONF"
