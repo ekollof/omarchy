@@ -257,6 +257,12 @@ EOF
   fi
   docker() { echo "exited"; return 0; }
   container_gone || fail "a stopped container does not read as gone"
+  # A successful inspect that also warns on stderr must not poison the
+  # status match: diagnostics travel separately from the reported state.
+  docker() { echo "WARNING: API deprecation notice" >&2; echo "running"; return 0; }
+  if container_gone; then
+    fail "a warning on stderr reads a live container as gone"
+  fi
 )
 pass "the share watcher leaves once the container is gone"
 
