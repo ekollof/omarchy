@@ -622,14 +622,22 @@ restore_all_shared_privacy() {
 # paused — a paused entrypoint resumes, so a flip may still come), or a
 # probe that positively reports no such container. Anything else — denied,
 # unreachable — keeps watching: exiting past a flip that may still come
-# would reopen the hole, while a lingering watcher is merely untidy.
+# would reopen the hole, while a lingering watcher is merely untidy. Status
+# and diagnostics travel separately: a warning on stderr must never poison
+# the stdout match and read a live container as gone.
 container_gone() {
-  local probe
-  probe=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>&1) || {
-    [[ $probe == *"No such object"* || $probe == *"No such container"* ]] && return 0
+  local status err_file
+  err_file=$(mktemp) || return 1
+  status=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>"$err_file") || {
+    if grep -qE "No such object|No such container" "$err_file"; then
+      rm -f -- "$err_file"
+      return 0
+    fi
+    rm -f -- "$err_file"
     return 1
   }
-  if [[ $probe == "running" || $probe == "restarting" || $probe == "created" || $probe == "paused" ]]; then
+  rm -f -- "$err_file"
+  if [[ $status == "running" || $status == "restarting" || $status == "created" || $status == "paused" ]]; then
     return 1
   else
     return 0
