@@ -68,6 +68,11 @@ Item {
   // font's side bearings, which would pad pills a pixel or two wider per
   // side than tight-measured icon glyphs. Zero on icon-only buttons.
   readonly property real labelTightWidth: label.visible ? Math.max(0, labelTightMetrics.tightBoundingRect.width) : 0
+  // Tight painted height of the label, for ink-to-ink gaps on a vertical bar.
+  // Single-line only: TextMetrics tight bounds do not span stacked lines, so
+  // a multi-line stack reports 0 and keeps the full-bleed fallback instead
+  // of collapsing its slot. Zero on icon-only buttons.
+  readonly property real labelTightHeight: label.visible && root.text.indexOf("\n") === -1 ? Math.max(0, labelTightMetrics.tightBoundingRect.height) : 0
 
   visible: hasVisualContent || keepSpace
   opacity: !hasVisualContent || concealed ? 0 : (dimmed ? 0.45 : 1)

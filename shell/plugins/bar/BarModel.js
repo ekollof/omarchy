@@ -215,8 +215,10 @@ function nearestDropTarget(candidates, point, vertical) {
 // touching the neighbour. Zero spans stay collapsed so hidden widgets keep
 // contributing no gap. `maxIntrude` lets the padding go negative into the
 // widget's own empty margins to enforce gaps smaller than the widest
-// bearing; it never reaches paint, but neighbouring hit areas overlap by
-// that much, so keep it small.
+// bearing; it never reaches paint. Neighbouring hit areas can still overlap
+// by that much, but bar presses resolve per slot (see targetInSlot), so an
+// overlap never activates the wrong module — keep the cap small anyway so
+// the visual rhythm stays tight.
 function slotPad(contentSpan, paintedExtent, halfGap, maxIntrude) {
   var span = Number(contentSpan)
   if (!isFinite(span) || span <= 0) return 0
@@ -235,7 +237,8 @@ function slotPad(contentSpan, paintedExtent, halfGap, maxIntrude) {
 // same function runs against live QObjects and plain test fixtures.
 function hasPaintMetrics(value) {
   if (!value) return false
-  return "glyphPaintedWidth" in value || "labelTightWidth" in value
+  return "glyphPaintedWidth" in value || "glyphPaintedHeight" in value
+    || "labelTightWidth" in value || "labelTightHeight" in value
     || "labelWidth" in value || "iconContentItem" in value
     || "opticalSize" in value
 }
@@ -251,10 +254,99 @@ function paintChild(item) {
   return null
 }
 
+// Painted size of loaded vector icon content. Icon components arrive as-is
+// from their panels: tailscale and dropbox center the real icon inside a
+// bare Item wrapper with no implicit size of its own, so reading only the
+// loaded root measures a zero and the slot would fall back to the full
+// canvas. Scan the wrapper (depth-limited, sizes only — never interaction)
+// and take the bounding box of whatever reports one; non-visual children
+// carry no implicit size and drop out on their own. Duck-typed so the same
+// function runs against live QObjects and plain test fixtures.
+function vectorPaintedExtent(content) {
+  var best = { width: 0, height: 0 }
+  var stack = [{ node: content, depth: 0 }]
+  while (stack.length > 0) {
+    var current = stack.pop()
+    var node = current.node
+    if (!node || current.depth > 3) continue
+    var w = Number(node.implicitWidth)
+    var h = Number(node.implicitHeight)
+    if (isFinite(w) && w > best.width) best.width = w
+    if (isFinite(h) && h > best.height) best.height = h
+    var kids = node.children
+    if (!kids || typeof kids.length !== "number") continue
+    for (var i = 0; i < kids.length; i++) {
+      stack.push({ node: kids[i], depth: current.depth + 1 })
+    }
+  }
+  return best
+}
+
+function positiveNumber(value) {
+  var n = Number(value)
+  return isFinite(n) && n > 0 ? n : 0
+}
+
+// Tight painted extent along the layout axis, best effort. `snapshot` is a
+// plain object of already-measured paint metrics (the slot builds it from
+// its paint item); keeping the decision tree here in one pure function
+// means every branch is unit-testable without a rendered scene.
+// Horizontal: glyph paint, tight label ink, label advance, vector content
+// (capped at the canvas so an over-reporting component cannot shrink its
+// padding), canvas, full-bleed fallback. Vertical mirrors it along height:
+// tight glyph/label ink, vector content, canvas, full-bleed fallback.
+function paintedExtent(snapshot) {
+  var s = snapshot || {}
+  if (s.vertical) {
+    if (positiveNumber(s.glyphPaintedHeight) > 0) return positiveNumber(s.glyphPaintedHeight)
+    if (positiveNumber(s.labelTightHeight) > 0) return positiveNumber(s.labelTightHeight)
+    var vh = positiveNumber(s.vectorHeight)
+    if (vh > 0) {
+      var vo = positiveNumber(s.opticalSize)
+      return vo > 0 ? Math.min(vh, vo) : vh
+    }
+    if (positiveNumber(s.opticalSize) > 0) return positiveNumber(s.opticalSize)
+    return positiveNumber(s.contentHeight)
+  }
+  if (positiveNumber(s.glyphPaintedWidth) > 0) return positiveNumber(s.glyphPaintedWidth)
+  if (positiveNumber(s.labelTightWidth) > 0) return positiveNumber(s.labelTightWidth)
+  if (positiveNumber(s.labelWidth) > 0) return positiveNumber(s.labelWidth)
+  var vw = positiveNumber(s.vectorWidth)
+  if (vw > 0) {
+    var ho = positiveNumber(s.opticalSize)
+    return ho > 0 ? Math.min(vw, ho) : vw
+  }
+  if (positiveNumber(s.opticalSize) > 0) return positiveNumber(s.opticalSize)
+  return positiveNumber(s.contentWidth)
+}
+
+// Whether a registered click target belongs to a module slot's press: the
+// target is the slot itself, its active item, or nested inside it. Bar
+// presses resolve per slot (each slot owns the MouseArea that caught the
+// press), so targets from neighbouring slots — whose buttons can extend
+// past a negatively padded slot edge — must not compete here; the slot
+// falls back to its own active item instead. Duck-typed on `.parent` so it
+// runs against live QObjects and plain test fixtures alike.
+function targetInSlot(target, slot) {
+  if (!target || !slot) return false
+  var active = slot.activeItem
+  var item = target
+  var guard = 0
+  while (item && guard < 32) {
+    if (item === slot || item === active) return true
+    item = item.parent
+    guard++
+  }
+  return false
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     hasPaintMetrics: hasPaintMetrics,
     paintChild: paintChild,
+    vectorPaintedExtent: vectorPaintedExtent,
+    paintedExtent: paintedExtent,
+    targetInSlot: targetInSlot,
     slotPad: slotPad,
     isDrawnSlot: isDrawnSlot,
     pickDrawnSlot: pickDrawnSlot,

@@ -1006,6 +1006,10 @@ Item {
     for (var i = clickTargets.length - 1; i >= 0; i--) {
       var target = clickTargets[i]
       if (!moduleTargetClickable(target)) continue
+      // Each slot owns the MouseArea that caught this press, so only its
+      // own targets compete: a neighbour's button can extend past a
+      // negatively padded slot edge, and must not steal the click.
+      if (!BarModel.targetInSlot(target, slot)) continue
 
       var targetPoint = { x: localX, y: localY }
       try {
@@ -1850,11 +1854,13 @@ Item {
     readonly property int paintHalfGap: Style.space(6)
     // How far slot padding may intrude into a widget's own empty margins to
     // enforce the gap above when a widget demands wider bearings. Never
-    // reaches paint, but neighbouring hit areas overlap by up to this much.
-    // Sized to cover the widest production bearing spread: a text pill at a
-    // scaled bar font carries ~halfGap + 4.5px of bearing per side against an
-    // icon's ~halfGap, so the cap must clear that or the pair keeps a
-    // subpixel residual (16.34px vs 16px at font 16).
+    // reaches paint. Neighbouring hit areas can still overlap by up to this
+    // much, but presses resolve per slot (see moduleClickTargetAt), so the
+    // overlap never activates the wrong module. Sized to cover the widest
+    // production bearing spread: a text pill at a scaled bar font carries
+    // ~halfGap + 4.5px of bearing per side against an icon's ~halfGap, so
+    // the cap must clear that or the pair keeps a subpixel residual
+    // (16.34px vs 16px at font 16).
     readonly property int paintIntrude: Style.space(4)
     // Size the slot lays out for its content (what implicitWidth used to be).
     readonly property real contentWidth: activeItem && activeItem.visible
@@ -1876,28 +1882,26 @@ Item {
     // BarIconButton glyphs (which also covers text painted wider than its
     // slot), WidgetButton labels, vector icon content, icon canvases.
     // Opaque customs fall back to full-bleed — extra air, never overlap.
+    // The decision tree lives in BarModel.paintedExtent so every branch is
+    // unit-testable; the slot only gathers already-measured paint metrics.
     readonly property real paintedExtent: {
       var item = paintItem
       if (!item) return 0
-      if (root.vertical) {
-        if ("opticalSize" in item && item.opticalSize > 0) return item.opticalSize
-        return contentHeight
-      }
-      if ("glyphPaintedWidth" in item && item.glyphPaintedWidth > 0) return item.glyphPaintedWidth
-      if ("labelTightWidth" in item && item.labelTightWidth > 0) return item.labelTightWidth
-      if ("labelWidth" in item && item.labelWidth > 0) return item.labelWidth
-      // Vector icons size themselves under the canvas (usually to the icon
-      // font); measure the loaded item instead of assuming a full canvas,
-      // capped at the canvas so an over-reporting component cannot shrink
-      // its padding.
-      if ("iconContentItem" in item && item.iconContentItem
-          && item.iconContentItem.implicitWidth > 0) {
-        if ("opticalSize" in item && item.opticalSize > 0)
-          return Math.min(item.iconContentItem.implicitWidth, item.opticalSize)
-        return item.iconContentItem.implicitWidth
-      }
-      if ("opticalSize" in item && item.opticalSize > 0) return item.opticalSize
-      return contentWidth
+      var vector = ("iconContentItem" in item)
+        ? BarModel.vectorPaintedExtent(item.iconContentItem) : null
+      return BarModel.paintedExtent({
+        vertical: root.vertical,
+        glyphPaintedWidth: ("glyphPaintedWidth" in item) ? item.glyphPaintedWidth : 0,
+        glyphPaintedHeight: ("glyphPaintedHeight" in item) ? item.glyphPaintedHeight : 0,
+        labelTightWidth: ("labelTightWidth" in item) ? item.labelTightWidth : 0,
+        labelTightHeight: ("labelTightHeight" in item) ? item.labelTightHeight : 0,
+        labelWidth: ("labelWidth" in item) ? item.labelWidth : 0,
+        vectorWidth: vector ? vector.width : 0,
+        vectorHeight: vector ? vector.height : 0,
+        opticalSize: ("opticalSize" in item) ? item.opticalSize : 0,
+        contentWidth: contentWidth,
+        contentHeight: contentHeight
+      })
     }
     // Symmetric compensation for this slot's own bearing. Negative bearings
     // (paint wider than the slot) pad extra; the pure-gap spacer keeps its

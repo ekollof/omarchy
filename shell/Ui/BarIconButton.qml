@@ -12,6 +12,7 @@ WidgetButton {
   // Measured against the slot, which the open-panel underline centers on.
   readonly property real opticalCenterErrorX: glyph.visible ? opticalCanvas.x + glyph.paintedCenterX - root.width / 2 : 0
   readonly property real glyphPaintedWidth: glyph.visible ? glyph.tightWidth : 0
+  readonly property real glyphPaintedHeight: glyph.visible ? glyph.tightHeight : 0
   // Forwards the loaded vector icon, if any. Loader.item is statically
   // QObject (reading .implicitWidth off it trips missing-property), so the
   // bar measures through this untyped alias instead. Null on the glyph path.
