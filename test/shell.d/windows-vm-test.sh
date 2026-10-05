@@ -249,6 +249,14 @@ EOF
   if container_gone; then
     fail "a restarting container reads as gone"
   fi
+  # A paused entrypoint resumes: samba can still flip the share afterwards,
+  # so paused keeps the watcher alive rather than ending it.
+  docker() { echo "paused"; return 0; }
+  if container_gone; then
+    fail "a paused container reads as gone"
+  fi
+  docker() { echo "exited"; return 0; }
+  container_gone || fail "a stopped container does not read as gone"
 )
 pass "the share watcher leaves once the container is gone"
 
