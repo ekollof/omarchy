@@ -225,15 +225,22 @@ export HOME=$test_home
 set -- help
 source "$windows_vm_command" >/dev/null
 sleep() { :; }
-docker() { return 1; }
+docker() { echo "Error: No such object: omarchy-windows" >&2; return 1; }
 watch_share_privacy "\$HOME/Windows"
 EOF
   timeout 120 bash "$test_home/watch.sh" ||
     fail "the watcher outlived a gone container"
   [[ $(stat -Lc '%a' "$test_home/Windows") == 700 ]] ||
     fail "the watcher exit left the share at $(stat -Lc '%a' "$test_home/Windows")"
-  docker() { return 1; }
+  docker() { echo "Error: No such object: omarchy-windows" >&2; return 1; }
   container_gone || fail "a missing container does not read as gone"
+  # A default install cannot inspect the root-owned daemon at all: that
+  # permission failure must keep watching, not read as gone while samba can
+  # still flip the share later.
+  docker() { echo "permission denied while trying to connect to the Docker daemon socket" >&2; return 1; }
+  if container_gone; then
+    fail "an uninspectable daemon reads as a gone container"
+  fi
   docker() { echo "running"; return 0; }
   if container_gone; then
     fail "a running container reads as gone"
