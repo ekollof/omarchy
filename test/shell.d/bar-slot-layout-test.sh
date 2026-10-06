@@ -25,6 +25,9 @@ import "BarModel.js" as BarModel
 
 ShellRoot {
   function check(host) {
+    // The contract is two scaled 6px bearings, independent of the slot
+    // implementation. A changed production half-gap must fail this test.
+    var expectedGap = 2 * Style.space(6)
     var slots = host.layoutItem.children
     var previous = null
     var count = 0
@@ -39,7 +42,7 @@ ShellRoot {
       var trailing = (host.vertical ? center.y : center.x) + slot.paintedExtent / 2
       // Positioners and Loader centering can round opposite edges by a
       // pixel; larger errors must fail rather than recalculate slot padding.
-      if (previous !== null && Math.abs(leading - previous - 2 * slot.paintHalfGap) > 1.01)
+      if (previous !== null && Math.abs(leading - previous - expectedGap) > 1.01)
         throw new Error((host.vertical ? "vertical" : "horizontal") + " gap before " + slot.moduleName + ": " + (leading - previous))
       previous = trailing
     }
