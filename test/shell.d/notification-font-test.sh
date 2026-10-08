@@ -54,11 +54,34 @@ font set "$custom_family" >/dev/null
 [[ $(mode) == "$custom_family" ]] || fail "notification font set persists a custom family"
 pass "notification font set persists a custom family"
 
-if font set "No Such Font XYZ-123" 2>/dev/null; then
+if font set "No Such Font XYZ-123" >"$tmpdir/font-error" 2>&1; then
   fail "notification font set rejects unknown families"
 fi
 [[ $(mode) == "$custom_family" ]] || fail "notification font set leaves the stored mode alone on rejection"
 pass "notification font set rejects unknown families"
+grep -Fq "Font 'No Such Font XYZ-123' not found." "$tmpdir/font-error" || fail "unknown family has an explanatory error"
+pass "unknown family has an explanatory error"
+
+# Fixed font database catches partial-family, style and empty-string matches
+# independently of whichever font packages the test machine has installed.
+cat >"$tmpdir/fc-list" <<'FONTS'
+#!/bin/bash
+printf '%s\n' 'Fixture Sans,Fixture Sans Alias' 'Fixture Mono'
+FONTS
+chmod +x "$tmpdir/fc-list"
+for invalid_family in "" "Fixture" "Regular"; do
+  if font set "$invalid_family" >"$tmpdir/font-error" 2>&1; then
+    fail "reject empty, partial and style names" "$invalid_family"
+  fi
+  [[ $(mode) == "$custom_family" ]] || fail "invalid family must preserve config"
+done
+pass "empty, partial and style names are rejected without changing config"
+font set "fixture sans alias" >/dev/null
+[[ $(mode) == "fixture sans alias" ]] || fail "full aliases are accepted case-insensitively"
+pass "full aliases are accepted case-insensitively"
+font list | grep -Fx 'Fixture Sans' >/dev/null || fail "proportional families appear in the list"
+pass "proportional families appear in the list"
+rm "$tmpdir/fc-list"
 
 if font bogus 2>/dev/null; then
   fail "notification font rejects unknown subcommands"

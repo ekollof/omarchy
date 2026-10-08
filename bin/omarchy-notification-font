@@ -66,12 +66,12 @@ cmd_system() {
 }
 
 cmd_set() {
-  local font_name="${1:-}" matches
+  local font_name="${1:-}"
   (( $# == 1 )) || fail "set takes a single font family name"
-  # grep -c reads the whole input, so fc-list never takes a SIGPIPE
-  # the way it would with `grep -q` under `pipefail`.
-  matches=$(fc-list 2>/dev/null | grep -Fic -- "$font_name")
-  if (( matches == 0 )); then
+  [[ -n $font_name ]] || fail "font family must not be empty"
+  # Match complete family names, including aliases, without searching styles
+  # or filenames. Read all input to avoid SIGPIPE with pipefail enabled.
+  if ! installed_families | grep -Fxi -- "$font_name" >/dev/null; then
     echo "Font '$font_name' not found." >&2
     exit 1
   fi
@@ -79,9 +79,13 @@ cmd_set() {
   echo "Notification font set to $font_name"
 }
 
+installed_families() {
+  fc-list -f '%{family}\n' | tr ',' '\n' | sort -u
+}
+
 cmd_list() {
   (( $# == 0 )) || fail "list takes no arguments"
-  omarchy-font-list
+  installed_families
 }
 
 cmd="${1:-show}"
