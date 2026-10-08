@@ -47,14 +47,17 @@ out=$(font show)
 [[ $out == *"mode: system"* ]] || fail "notification font show reports system mode" "$out"
 pass "notification font show reports system mode"
 
-font set "DejaVu Sans" >/dev/null
-[[ $(mode) == "DejaVu Sans" ]] || fail "notification font set persists a custom family"
+mapfile -t installed_families < <(fc-list -f '%{family[0]}\n' | sort -u)
+custom_family=${installed_families[0]}
+[[ -n $custom_family ]] || fail "custom font test needs an installed family"
+font set "$custom_family" >/dev/null
+[[ $(mode) == "$custom_family" ]] || fail "notification font set persists a custom family"
 pass "notification font set persists a custom family"
 
 if font set "No Such Font XYZ-123" 2>/dev/null; then
   fail "notification font set rejects unknown families"
 fi
-[[ $(mode) == "DejaVu Sans" ]] || fail "notification font set leaves the stored mode alone on rejection"
+[[ $(mode) == "$custom_family" ]] || fail "notification font set leaves the stored mode alone on rejection"
 pass "notification font set rejects unknown families"
 
 if font bogus 2>/dev/null; then
