@@ -21,6 +21,7 @@ cat >"$test_tmp/shell.qml" <<'QML'
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 ShellRoot {
@@ -53,6 +54,18 @@ ShellRoot {
   }
 
   Component.onCompleted: Qt.callLater(function() {
+    var originalValues = Commons.Color.shellValues
+    Style.applyShellValues({ "bar.icon-font": "16" })
+    if (Style.bar.iconFont !== 16 || Style.font.body !== 12) {
+      fail("icon font override does not preserve text size")
+      return
+    }
+    Style.applyShellValues({ "bar.icon-font": "16", "font.base-size": "18" })
+    if (Style.bar.iconFont !== 24) {
+      fail("icon font override does not scale with text size")
+      return
+    }
+    Style.applyShellValues(originalValues)
     if (!checkIcon(bluetooth, "bluetooth")) return
     if (!checkIcon(network, "network")) return
     if (!checkIcon(audio, "audio")) return
