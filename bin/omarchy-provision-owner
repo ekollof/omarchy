@@ -1013,7 +1013,7 @@ run_provisioning() {
   log_step "finalizing user"
   echo finalize >"$STATE_FILE"
   if ! finalize_user; then
-    log_step "finalize-user failed (continuing; user can retry after login)"
+    log_step "finalize-user failed (continuing)"
     touch "$FINALIZE_WARNING_FLAG"
   fi
 
@@ -1033,6 +1033,15 @@ run_provisioning() {
     reset_limine_config
     limine-update
   fi
+
+  if omarchy-pkg-present usbguard; then
+    log_step "enrolling the owner's USB devices"
+    source "$OMARCHY_PATH/install/helpers/usb-authorization.sh"
+    usb_authorization_provision_owner "$username"
+  fi
+
+  log_step "enrolling the owner's Thunderbolt accessories"
+  /usr/bin/omarchy-thunderbolt-authorization-admin owner
 
   log_step "cleaning up provisioning state"
   cleanup_oem_state
@@ -1092,7 +1101,6 @@ run_setup() {
     clear_logo
     echo
     say --foreground 1 "User finalization reported errors (see $LOG_FILE)."
-    say --foreground 1 "Run 'omarchy-provision-user --force' after login to retry."
     sleep 3
   fi
 
