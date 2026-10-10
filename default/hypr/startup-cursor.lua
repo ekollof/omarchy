@@ -4,12 +4,16 @@
 -- omarchy-hyprland-monitor-watch while a slow display is still waking up)
 -- wipes this module's Lua state without touching the compositor's config or
 -- environment. The captured cursor therefore also lives in the runtime dir,
--- so a fresh state that still sees the blank theme picks the restore back up
--- instead of stranding the pointer invisible.
+-- so a fresh state picks the restore back up even after application startup
+-- has restored XCURSOR_THEME. The phase belongs to this compositor instance.
+local instance = os.getenv("HYPRLAND_INSTANCE_SIGNATURE") or ""
+local phase_key = "OMARCHY_STARTUP_CURSOR"
+local pending_phase = instance .. ":pending"
+local done_phase = instance .. ":done"
 local function omarchy_startup_cursor_state_path()
   local runtime = os.getenv("XDG_RUNTIME_DIR")
-  if not runtime or runtime == "" then return nil end
-  return runtime .. "/omarchy-startup-cursor.lua"
+  if not runtime or runtime == "" or instance == "" or instance:find("[^%w_-]") then return nil end
+  return runtime .. "/omarchy-startup-cursor-" .. instance .. ".lua"
 end
 
 local function omarchy_startup_cursor_save(cursor)
@@ -61,6 +65,7 @@ function omarchy_startup_cursor_restore(loaded)
   local cursor = omarchy_startup_cursor
   if loaded then
     omarchy_startup_cursor_pending = false
+    hl.env(phase_key, done_phase)
     hl.config({ cursor = cursor.config })
     local theme = (cursor.config.enable_hyprcursor and cursor.hyprcursor and cursor.hyprcursor ~= "" and cursor.hyprcursor) or cursor.xcursor
     hl.exec_cmd("hyprctl setcursor " .. o.shell_quote(theme) .. " " .. cursor.size)
@@ -76,8 +81,12 @@ end
 hl.on("config.reloaded", function()
   if omarchy_startup_cursor_pending == nil then
     -- Config updates in an existing compositor must not hide its pointer.
-    omarchy_startup_cursor_pending = #hl.get_monitors() == 0
-    if omarchy_startup_cursor_pending then
+    local phase = os.getenv(phase_key)
+    local saved = phase == pending_phase and omarchy_startup_cursor_load() or nil
+    omarchy_startup_cursor_pending = saved ~= nil or (phase ~= done_phase and #hl.get_monitors() == 0)
+    if saved then
+      omarchy_startup_cursor = saved
+    elseif omarchy_startup_cursor_pending then
       local hyprcursor = hl.get_config("cursor.enable_hyprcursor")
       omarchy_startup_cursor = {
         config = {
@@ -94,15 +103,7 @@ hl.on("config.reloaded", function()
       hl.env("XCURSOR_PATH", os.getenv("OMARCHY_PATH") .. "/default/hypr/cursors:" .. omarchy_startup_cursor.path)
       hl.env("XCURSOR_THEME", "omarchy-startup")
       omarchy_startup_cursor_save(omarchy_startup_cursor)
-    elseif os.getenv("XCURSOR_THEME") == "omarchy-startup" then
-      -- A reload wiped a pending restore: the compositor still shows the
-      -- blank theme but this state is fresh. Pick the restore back up from
-      -- the saved capture instead of stranding the pointer.
-      local saved = omarchy_startup_cursor_load()
-      if saved then
-        omarchy_startup_cursor = saved
-        omarchy_startup_cursor_pending = true
-      end
+      hl.env(phase_key, pending_phase)
     else
       -- Healthy session: a leftover capture (e.g. from a crash) must never
       -- hide the pointer of a later reload.
