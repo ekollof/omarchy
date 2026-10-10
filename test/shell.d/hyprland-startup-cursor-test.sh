@@ -4,11 +4,20 @@ set -euo pipefail
 source "$(dirname "$0")/base-test.sh"
 require_command lua
 
-lua <<'LUA'
+# The restore persists its capture here so a reload that wipes Lua state can
+# pick it back up. Keep it hermetic: never touch the session runtime dir.
+export XDG_RUNTIME_DIR
+XDG_RUNTIME_DIR="$(mktemp -d)"
+lua_test="$(mktemp)"
+trap 'rm -rf "$XDG_RUNTIME_DIR" "$lua_test"' EXIT
+
+# NOTE: lua 5.5 exits 0 on errors in programs read from stdin, which would
+# mask every assertion below. Run the program from a file so failures fail.
+cat >"$lua_test" <<'LUA'
 package.path = os.getenv("ROOT") .. "/?.lua;" .. package.path
 local events, recovery, command = {}, nil, nil
 local config = { invisible = false, enable_hyprcursor = true, sync_gsettings_theme = true }
-local env = { XCURSOR_THEME = "my-xcursor", HYPRCURSOR_THEME = "my-hyprcursor", XCURSOR_PATH = "/my/icons" }
+local env = { OMARCHY_PATH = os.getenv("ROOT"), XCURSOR_THEME = "my-xcursor", HYPRCURSOR_THEME = "my-hyprcursor", XCURSOR_PATH = "/my/icons" }
 local getenv = os.getenv
 os.getenv = function(name) return env[name] or getenv(name) end
 local monitors = {}
@@ -39,6 +48,22 @@ events["config.reloaded"]()
 assert(config.invisible and not config.enable_hyprcursor and not config.sync_gsettings_theme)
 assert(env.XCURSOR_THEME == "omarchy-startup" and env.XCURSOR_PATH:match("/default/hypr/cursors:/my/icons$"))
 assert(omarchy_startup_cursor_pending, "the first compositor frame must use the blank cursor")
+local state_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor.lua"
+assert(io.open(state_file, "r"), "the capture must survive a reload that wipes Lua state")
+
+-- A reload while the restore is pending (e.g. monitor-watch recovering a
+-- still-waking display) wipes Lua state but keeps compositor config and
+-- environment. Fresh state must pick the restore back up from the capture
+-- instead of stranding the blank theme.
+omarchy_startup_cursor_pending = nil
+omarchy_startup_cursor = nil
+monitors = { {} }
+events["config.reloaded"]()
+assert(omarchy_startup_cursor_pending, "a wiped pending restore must resume while the blank theme is still set")
+assert(omarchy_startup_cursor.xcursor == "my-xcursor", "the resumed restore must use the captured theme, not the blank one")
+assert(config.invisible and not config.sync_gsettings_theme, "resuming must re-hide the compositor cursor until the reveal")
+monitors = {}
+
 events["hyprland.start"]()
 assert(env.XCURSOR_THEME == "my-xcursor" and env.XCURSOR_PATH == "/my/icons", "applications must inherit the user's cursor")
 assert(config.invisible, "starting applications must not reveal the cursor")
@@ -52,15 +77,40 @@ assert(config.invisible, "wait for the normal theme before restoring visibility"
 omarchy_startup_cursor_restore(true)
 assert(not config.invisible and config.enable_hyprcursor and config.sync_gsettings_theme)
 assert(command:match("setcursor 'my%-hyprcursor'"), "restore the user's Hyprcursor theme")
+assert(not io.open(state_file, "r"), "a revealed cursor must drop its capture so later reloads stay untouched")
 local previous_command = command
 previous_recovery()
 assert(command == previous_command, "recovery must not change a revealed cursor")
 events["config.reloaded"]()
 assert(not config.invisible and env.XCURSOR_THEME == "my-xcursor", "ordinary config reloads must not hide the cursor")
 
+-- Without a Hyprcursor theme (plain Xcursor session) the reveal must still
+-- run setcursor with the captured theme so GSettings re-syncs off the blank
+-- one instead of persisting it.
+omarchy_startup_cursor_pending = true
+omarchy_startup_cursor = {
+  config = { invisible = false, enable_hyprcursor = true, sync_gsettings_theme = true },
+  hyprcursor = nil,
+  size = 24,
+  path = "/my/icons",
+  xcursor = "my-xcursor",
+}
+command = nil
+omarchy_startup_cursor_restore(true)
+assert(not config.invisible and config.sync_gsettings_theme)
+assert(command:match("setcursor 'my%-xcursor'"), "restore the Xcursor fallback when the Hyprcursor theme is unset")
+assert(not io.open(state_file, "r"), "the fallback reveal must drop its capture too")
+
+-- A leftover capture in a healthy session (e.g. from a crash before the
+-- reveal) must never hide the pointer of a later reload.
+local stale = io.open(state_file, "w")
+stale:write("return { xcursor = 'my-xcursor', path = '/my/icons', size = 24 }\n")
+stale:close()
 omarchy_startup_cursor_pending = nil
 monitors = { {} }
 events["config.reloaded"]()
 assert(not omarchy_startup_cursor_pending and not config.invisible, "installing the fix in a running compositor must leave its cursor alone")
+assert(not io.open(state_file, "r"), "a healthy reload must drop a stale capture")
 LUA
+lua "$lua_test"
 pass "the first compositor frame starts blank and the reveal restores user cursor settings"
