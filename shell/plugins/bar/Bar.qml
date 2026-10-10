@@ -1454,6 +1454,7 @@ Item {
         CenterModules {
           anchors.fill: parent
           entries: barWindow.centerBesideRight ? [] : root.layoutEntries("center")
+          hoverEnabled: !barWindow.centerBesideRight
         }
 
         LeftModules {
@@ -1478,6 +1479,12 @@ Item {
           anchors.right: rightModules.left
           anchors.rightMargin: Style.space(4)
           anchors.verticalCenter: parent.verticalCenter
+
+          HoverHandler {
+            enabled: barWindow.centerBesideRight
+            onHoveredChanged: root.setCenterSectionHovered(hovered)
+            Component.onDestruction: if (hovered) root.setCenterSectionHovered(false)
+          }
         }
       }
     }
@@ -1647,6 +1654,7 @@ Item {
     id: centerRoot
 
     property var entries: root.layoutEntries("center")
+    property bool hoverEnabled: true
     readonly property bool hasAnchor: root.entryIndex(entries, root.centerAnchor) !== -1
     readonly property var anchorEntry: root.findCenterAnchorEntry(entries)
 
@@ -1670,7 +1678,9 @@ Item {
           anchors.bottom: parent.bottom
 
           HoverHandler {
+            enabled: centerRoot.hoverEnabled
             onHoveredChanged: root.setCenterSectionHovered(hovered)
+            Component.onDestruction: if (hovered) root.setCenterSectionHovered(false)
           }
         }
 
@@ -1722,7 +1732,9 @@ Item {
           anchors.bottom: centerRoot.hasAnchor ? centerAnchorModule.top : parent.bottom
 
           HoverHandler {
+            enabled: centerRoot.hoverEnabled
             onHoveredChanged: root.setCenterSectionHovered(hovered)
+            Component.onDestruction: if (hovered) root.setCenterSectionHovered(false)
           }
         }
 
