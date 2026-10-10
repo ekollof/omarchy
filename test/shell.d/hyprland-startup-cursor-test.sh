@@ -17,7 +17,7 @@ cat >"$lua_test" <<'LUA'
 package.path = os.getenv("ROOT") .. "/?.lua;" .. package.path
 local events, recovery, command = {}, nil, nil
 local config = { invisible = false, enable_hyprcursor = true, sync_gsettings_theme = true }
-local env = { OMARCHY_PATH = os.getenv("ROOT"), XCURSOR_THEME = "my-xcursor", HYPRCURSOR_THEME = "my-hyprcursor", XCURSOR_PATH = "/my/icons" }
+local env = { OMARCHY_PATH = os.getenv("ROOT"), HYPRLAND_INSTANCE_SIGNATURE = "test-instance-a", XCURSOR_THEME = "my-xcursor", HYPRCURSOR_THEME = "my-hyprcursor", XCURSOR_PATH = "/my/icons" }
 local getenv = os.getenv
 os.getenv = function(name) return env[name] or getenv(name) end
 local monitors = {}
@@ -48,7 +48,7 @@ events["config.reloaded"]()
 assert(config.invisible and not config.enable_hyprcursor and not config.sync_gsettings_theme)
 assert(env.XCURSOR_THEME == "omarchy-startup" and env.XCURSOR_PATH:match("/default/hypr/cursors:/my/icons$"))
 assert(omarchy_startup_cursor_pending, "the first compositor frame must use the blank cursor")
-local state_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor.lua"
+local state_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor-test-instance-a.lua"
 assert(io.open(state_file, "r"), "the capture must survive a reload that wipes Lua state")
 
 -- A reload while the restore is pending (e.g. monitor-watch recovering a
@@ -69,7 +69,11 @@ assert(env.XCURSOR_THEME == "my-xcursor" and env.XCURSOR_PATH == "/my/icons", "a
 assert(config.invisible, "starting applications must not reveal the cursor")
 
 local previous_recovery = recovery
+omarchy_startup_cursor_pending = nil
+omarchy_startup_cursor = nil
+monitors = { {} }
 events["config.reloaded"]()
+assert(omarchy_startup_cursor_pending and omarchy_startup_cursor.xcursor == "my-xcursor", "a fresh Lua state after application startup must recover the pending reveal")
 assert(recovery ~= previous_recovery and config.invisible, "a config reload must retain startup hiding and rearm recovery")
 recovery()
 assert(command:match("setcursor 'my%-xcursor'"), "restore the Xcursor fallback before revealing the pointer")
@@ -100,6 +104,42 @@ omarchy_startup_cursor_restore(true)
 assert(not config.invisible and config.sync_gsettings_theme)
 assert(command:match("setcursor 'my%-xcursor'"), "restore the Xcursor fallback when the Hyprcursor theme is unset")
 assert(not io.open(state_file, "r"), "the fallback reveal must drop its capture too")
+
+-- A fresh state after reveal stays done, even with all monitors unplugged.
+omarchy_startup_cursor_pending = nil
+omarchy_startup_cursor = nil
+monitors = {}
+events["config.reloaded"]()
+assert(not omarchy_startup_cursor_pending and not config.invisible, "a completed startup must not restart on a monitorless reload")
+
+-- An independent compositor must not overwrite or remove A's capture.
+local capture = assert(io.open(state_file, "w"))
+capture:write("return { xcursor = 'cursor-a', path = '/icons-a', size = 24 }\n")
+capture:close()
+env.HYPRLAND_INSTANCE_SIGNATURE = "test-instance-b"
+env.OMARCHY_STARTUP_CURSOR = "test-instance-a:pending"
+package.loaded["default.hypr.startup-cursor"] = nil
+require("default.hypr.startup-cursor")
+omarchy_startup_cursor_pending = nil
+monitors = { {} }
+events["config.reloaded"]()
+assert(not omarchy_startup_cursor_pending and io.open(state_file, "r"), "a healthy compositor B must leave A's capture alone")
+omarchy_startup_cursor_pending = nil
+monitors = {}
+events["config.reloaded"]()
+local other_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor-test-instance-b.lua"
+assert(io.open(other_file, "r") and io.open(state_file, "r"), "two startups must keep separate captures")
+omarchy_startup_cursor_restore(true)
+assert(not io.open(other_file, "r") and io.open(state_file, "r"), "revealing B must not remove A's capture")
+env.HYPRLAND_INSTANCE_SIGNATURE = "test-instance-a"
+env.OMARCHY_STARTUP_CURSOR = "test-instance-a:pending"
+package.loaded["default.hypr.startup-cursor"] = nil
+require("default.hypr.startup-cursor")
+omarchy_startup_cursor_pending = nil
+monitors = { {} }
+events["config.reloaded"]()
+assert(omarchy_startup_cursor.xcursor == "cursor-a" and omarchy_startup_cursor.path == "/icons-a", "A must recover its own cursor after B reveals")
+omarchy_startup_cursor_restore(true)
 
 -- A leftover capture in a healthy session (e.g. from a crash before the
 -- reveal) must never hide the pointer of a later reload.
