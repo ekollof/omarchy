@@ -209,8 +209,8 @@ ShellRoot {
         fail("icon paint width is not inside its slot")
         return
       }
-      if (!(overflow.glyphPaintedWidth > Style.bar.iconSlot)) {
-        fail("overflowing paint is not visible past its slot")
+      if (Math.abs(overflow.glyphPaintedWidth - Style.bar.iconSize) > 0.05) {
+        fail("multi-character icon paint is not normalized to the visual icon size")
         return
       }
       if (overflow.opticalSize !== Style.bar.iconCanvas) {
@@ -219,15 +219,15 @@ ShellRoot {
       }
       // Vector icons size themselves under the canvas (like the font-sized
       // status icons); the bar must see that size, not a full canvas.
-      if (!(vector.iconContentItem && vector.iconContentItem.implicitWidth === 12)) {
+      if (Math.abs(vector.componentPaintedWidth - Style.bar.iconSize) > 0.05) {
         fail("vector icon content is not measurable through the button")
         return
       }
       // Tailscale/dropbox panels wrap the real icon in a bare Item with no
       // implicit size: the slot must measure through the wrapper to the
       // ~11px mark, not fall back to the 16px canvas.
-      var wrappedSize = BarModel.vectorPaintedExtent(wrapped.iconContentItem)
-      if (!(wrappedSize.width === 11 && wrappedSize.height === 11)) {
+      var wrappedSize = { width: wrapped.componentPaintedWidth, height: wrapped.componentPaintedHeight }
+      if (!(Math.abs(wrappedSize.width - Style.bar.iconSize) < 0.05 && Math.abs(wrappedSize.height - Style.bar.iconSize) < 0.05)) {
         fail("wrapped vector icon is not measured through its wrapper")
         return
       }
@@ -238,7 +238,7 @@ ShellRoot {
         opticalSize: wrapped.opticalSize,
         contentWidth: wrapped.implicitWidth
       })
-      if (wrappedPainted !== 11) {
+      if (Math.abs(wrappedPainted - Style.bar.iconSize) > 0.05) {
         fail("wrapped vector extent is not the icon mark")
         return
       }
@@ -293,9 +293,9 @@ ShellRoot {
         fail("stacked label does not keep full-bleed")
         return
       }
-      var vectorVSize = BarModel.vectorPaintedExtent(vectorV.iconContentItem)
+      var vectorVSize = { width: vectorV.componentPaintedWidth, height: vectorV.componentPaintedHeight }
       var vectorVPainted = BarModel.paintedExtent({ vertical: true, vectorWidth: vectorVSize.width, vectorHeight: vectorVSize.height, opticalSize: vectorV.opticalSize, contentHeight: vectorV.implicitHeight })
-      if (!(vectorVPainted === 11)) {
+      if (!(Math.abs(vectorVPainted - Style.bar.iconSize) < 0.05)) {
         fail("vertical vector extent is not the icon mark")
         return
       }
