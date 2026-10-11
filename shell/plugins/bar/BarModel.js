@@ -407,6 +407,7 @@ function paintedExtent(snapshot) {
   var s = snapshot || {}
   if (s.vertical) {
     if (positiveNumber(s.glyphPaintedHeight) > 0) return positiveNumber(s.glyphPaintedHeight)
+    if (positiveNumber(s.iconPaintedHeight) > 0) return positiveNumber(s.iconPaintedHeight)
     if (positiveNumber(s.labelTightHeight) > 0) return positiveNumber(s.labelTightHeight)
     var vh = positiveNumber(s.vectorHeight)
     if (vh > 0) {
@@ -417,6 +418,7 @@ function paintedExtent(snapshot) {
     return positiveNumber(s.contentHeight)
   }
   if (positiveNumber(s.glyphPaintedWidth) > 0) return positiveNumber(s.glyphPaintedWidth)
+  if (positiveNumber(s.iconPaintedWidth) > 0) return positiveNumber(s.iconPaintedWidth)
   if (positiveNumber(s.labelTightWidth) > 0) return positiveNumber(s.labelTightWidth)
   if (positiveNumber(s.labelWidth) > 0) return positiveNumber(s.labelWidth)
   var vw = positiveNumber(s.vectorWidth)

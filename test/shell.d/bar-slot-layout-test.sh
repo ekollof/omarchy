@@ -38,6 +38,11 @@ ShellRoot {
       if (!slot.activeItem || !(slot.paintedExtent > 0)) throw new Error("slot did not load: " + slot.moduleName)
       count++
       var item = slot.activeItem
+      if (slot.moduleName === "commandIcon") {
+        var ink = host.vertical ? item.iconPaintedHeight : item.iconPaintedWidth
+        if (!(ink > 0) || Math.abs(slot.paintedExtent - ink) > 0.05)
+          throw new Error("command icon uses its button span instead of painted ink")
+      }
       var center = item.mapToItem(host, item.width / 2, item.height / 2)
       var leading = (host.vertical ? center.y : center.x) - slot.paintedExtent / 2
       var trailing = (host.vertical ? center.y : center.x) + slot.paintedExtent / 2
@@ -102,17 +107,18 @@ ShellRoot {
     function moduleClickTargetAt(slot, x, y) { return null }
     function pressModuleClickTarget(slot, button, x, y) { return false }
     property QtObject barWidgetRegistry: QtObject {
-      property var widgets: ({ glyph: { component: glyph }, pill: { component: pill }, vector: { component: vector }, wrapped: { component: wrapped }, stack: { component: stack } })
+      property var widgets: ({ glyph: { component: glyph }, commandIcon: { component: commandIcon }, pill: { component: pill }, vector: { component: vector }, wrapped: { component: wrapped }, stack: { component: stack } })
       function metadataFor(id) { return { firstParty: true } }
     }
     Component { id: glyph; BarIconButton { text: "x" } }
+    Component { id: commandIcon; WidgetButton { text: "\uf011" } }
     Component { id: pill; WidgetButton { text: "AB" } }
     Component { id: vector; BarIconButton { iconComponent: Component { Rectangle { implicitWidth: 12; implicitHeight: 12 } } } }
     Component { id: wrapped; BarIconButton { iconComponent: Component { Item { Rectangle { anchors.centerIn: parent; implicitWidth: 11; implicitHeight: 11 } } } } }
     Component { id: stack; WidgetButton { text: "A\nB" } }
     Component { id: emptyModuleComponent; Item {} }
     component CustomCommandModule: Item { required property var entry }
-    readonly property var entries: [{ id: "glyph" }, { id: "pill" }, { id: "vector" }, { id: "wrapped" }, { id: "stack" }]
+    readonly property var entries: [{ id: "glyph" }, { id: "commandIcon" }, { id: "pill" }, { id: "vector" }, { id: "wrapped" }, { id: "stack" }]
     Loader {
       id: layoutLoader
       sourceComponent: root.vertical ? columnLayout : rowLayout

@@ -2014,6 +2014,8 @@ Item {
         vertical: root.vertical,
         glyphPaintedWidth: ("glyphPaintedWidth" in item) ? item.glyphPaintedWidth : 0,
         glyphPaintedHeight: ("glyphPaintedHeight" in item) ? item.glyphPaintedHeight : 0,
+        iconPaintedWidth: ("iconPaintedWidth" in item) ? item.iconPaintedWidth : 0,
+        iconPaintedHeight: ("iconPaintedHeight" in item) ? item.iconPaintedHeight : 0,
         labelTightWidth: ("labelTightWidth" in item) ? item.labelTightWidth : 0,
         labelTightHeight: ("labelTightHeight" in item) ? item.labelTightHeight : 0,
         labelWidth: ("labelWidth" in item) ? item.labelWidth : 0,
