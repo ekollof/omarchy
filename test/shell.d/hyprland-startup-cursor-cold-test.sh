@@ -85,6 +85,9 @@ with tempfile.TemporaryDirectory() as directory:
       if float(green) > 20:
         break
       assert time.monotonic() < deadline, "the normal cursor did not return with the desktop"
+  except Exception:
+    print((stage / "compositor.log").read_text())
+    raise
   finally:
     os.killpg(compositor.pid, signal.SIGTERM)
     compositor.wait(timeout=10)
