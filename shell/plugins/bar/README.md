@@ -16,7 +16,7 @@ the shell for its whole session.
 
 The bar config lives under the `bar:` key of [`~/.config/omarchy/shell.json`](../../../docs/omarchy-shell.md#shelljson). Out of the box the shell uses [`config/omarchy/shell.json`](../../../config/omarchy/shell.json). Once you customize anything via the bar gestures, `omarchy bar ...`, or by editing shell.json directly, your file is canonical — there is no deep-merge.
 
-The bar is configured directly on the bar itself: drag empty bar space (or click-and-hold) to move the bar to another screen edge, double-left-click empty center-bar space to toggle transparency, and drag widgets to reorder them. The `omarchy bar position`, `omarchy bar transparent`, `omarchy bar move`, and `omarchy bar set` commands do the same from scripts. Enable or disable widgets with `omarchy plugin enable` and `omarchy plugin disable` (widget ids come from `omarchy plugin list`).
+The bar is configured directly on the bar itself: drag empty bar space (or click-and-hold) to move the bar to another screen edge, double-left-click empty center-bar space to cycle the bar background from clear to glassy to opaque, and drag widgets to reorder them. The `omarchy bar position`, `omarchy bar background`, `omarchy bar move`, and `omarchy bar set` commands do the same from scripts. Enable or disable widgets with `omarchy plugin enable` and `omarchy plugin disable` (widget ids come from `omarchy plugin list`).
 
 Example `shell.json` (bar subtree only shown):
 
@@ -25,7 +25,7 @@ Example `shell.json` (bar subtree only shown):
   "version": 1,
   "bar": {
     "position": "top",
-    "transparent": false,
+    "background": "opaque",
     "centerAnchor": "omarchy.clock",
     "layout": {
       "left": [
@@ -55,7 +55,7 @@ Example `shell.json` (bar subtree only shown):
 | Name | What it does | Interactions |
 |---|---|---|
 | `omarchy.menu` | Omarchy menu launcher | left = menu · right = terminal |
-| `omarchy.workspaces` | Hyprland workspace switcher | left = focus workspace |
+| `omarchy.workspaces` | Hyprland workspace switcher; the focused workspace shows its layout | left = focus workspace, or cycle the focused one's layout |
 | `omarchy.clock` | Date/time label + popup with a month grid, ISO week numbers, and month stepping | left = popup · right = cycle label format · middle = timezone selector |
 | `omarchy.media` | MPRIS now-playing — scrolling track + artist, cover-art popup | left = play/pause · middle = next · scroll = prev/next · right = popup |
 | `omarchy.indicators` | Manual state indicators | left = indicator action |
