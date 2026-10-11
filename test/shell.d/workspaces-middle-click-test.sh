@@ -23,6 +23,28 @@ press(1, false, widget, {MiddleButton: 4}, 3)
 assert(JSON.stringify(calls) === JSON.stringify([['pull', 3], ['cycle'], ['focus', 3]]),
   'middle-click pulls even a focused workspace; left-click cycles the focused layout or focuses another workspace')
 
+const pullFunction = qml.match(/function focusWorkspaceOnClickedMonitor\(id\) \{([\s\S]*?)\n  \}/)
+assert(pullFunction, 'the production pull function is available to exercise')
+const commands = []
+const bar = {run: command => commands.push(command)}
+const pullWidget = {bar, clickedMonitorName: () => 'DP-2'}
+const pull = new Function('id', 'root', 'Util', pullFunction[1])
+const util = {shellQuote: value => "'" + value.replace(/'/g, "'\\''") + "'"}
+pull(3, pullWidget, util)
+assert(commands.length === 1 && commands[0] ===
+  `hyprctl dispatch 'hl.dsp.focus({ monitor = "DP-2" })' && hyprctl dispatch 'hl.dsp.focus({ workspace = "3", on_current_monitor = true })'`,
+  'pull focuses the clicked monitor before dispatching the workspace, conditional on success')
+commands.length = 0
+pullWidget.clickedMonitorName = () => ''
+pull(3, pullWidget, util)
+assert(commands.length === 1 && commands[0] ===
+  `hyprctl dispatch 'hl.dsp.focus({ workspace = "3", on_current_monitor = true })'`,
+  'without a resolved monitor the pull dispatch targets the current monitor directly')
+commands.length = 0
+pullWidget.bar = null
+pull(3, pullWidget, util)
+assert(commands.length === 0, 'a detached widget does not dispatch a pull')
+
 assert(
   /function focusWorkspaceOnClickedMonitor/.test(qml),
   'workspace buttons expose a pull-to-clicked-monitor action'
