@@ -15,7 +15,7 @@ trap 'rm -rf "$XDG_RUNTIME_DIR" "$lua_test"' EXIT
 # mask every assertion below. Run the program from a file so failures fail.
 cat >"$lua_test" <<'LUA'
 package.path = os.getenv("ROOT") .. "/?.lua;" .. package.path
-local events, recovery, command, commands, imported = {}, nil, nil, {}, false
+local events, recovery, reveal, command, commands, imported = {}, nil, nil, nil, {}, false
 local config = { invisible = false, enable_hyprcursor = true, sync_gsettings_theme = true }
 local env = { OMARCHY_PATH = os.getenv("ROOT"), HYPRLAND_INSTANCE_SIGNATURE = "test-instance-a", XCURSOR_THEME = "my-xcursor", HYPRCURSOR_THEME = "my-hyprcursor", XCURSOR_PATH = "/my/icons" }
 local getenv = os.getenv
@@ -30,8 +30,13 @@ hl = {
     for name, value in pairs(values.cursor) do config[name] = value end
   end,
   timer = function(callback, options)
-    assert(options.timeout == 15000 and options.type == "oneshot")
-    recovery = callback
+    assert(options.type == "oneshot")
+    if options.timeout == 15000 then
+      recovery = callback
+    else
+      assert(options.timeout > 500, "outlast the compositor's 500ms cursor visibility check")
+      reveal = callback
+    end
   end,
   exec_cmd = function(value)
     if value == "dbus-update-activation-environment --systemd XCURSOR_PATH XCURSOR_THEME" then
@@ -88,7 +93,23 @@ recovery()
 assert(command:match("setcursor 'my%-xcursor'"), "restore the Xcursor fallback before revealing the pointer")
 assert(config.invisible, "wait for the normal theme before restoring visibility")
 omarchy_startup_cursor_restore(true)
+assert(config.invisible and not command:match("my%-hyprcursor"), "stay hidden until the compositor has applied the hide")
+assert(env.OMARCHY_STARTUP_CURSOR_SESSION == "test-instance-a", "a reload before the cursor is shown must still find the reveal pending")
+assert(env.OMARCHY_STARTUP_CURSOR == "test-instance-a:pending" and io.open(state_file, "r"), "the pending phase and snapshot must survive the redraw delay")
+local interrupted_reveal = reveal
+omarchy_startup_cursor_restore(true)
+assert(reveal == interrupted_reveal, "duplicate completion must not reschedule the redraw")
+omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
+dofile(os.getenv("ROOT") .. "/default/hypr/startup-cursor.lua")
+events["config.reloaded"]()
+interrupted_reveal()
+assert(omarchy_startup_cursor_pending and config.invisible and io.open(state_file, "r"), "an old reveal callback must not finish a fresh Lua-state recovery")
+recovery()
+omarchy_startup_cursor_restore(true)
+reveal()
+assert(env.OMARCHY_STARTUP_CURSOR == "test-instance-a:done", "mark startup done only after the delayed reveal")
 assert(not config.invisible and config.enable_hyprcursor and config.sync_gsettings_theme)
+assert(env.OMARCHY_STARTUP_CURSOR_SESSION == "", "a shown cursor ends the startup reveal")
 assert(command:match("setcursor 'my%-hyprcursor'"), "restore the user's Hyprcursor theme")
 assert(not io.open(state_file, "r"), "a revealed cursor must drop its capture so later reloads stay untouched")
 assert(commands[#commands - 1]:match("xsetroot %-cursor_name left_ptr"), "restore the X11/XWayland root cursor after a Lua-state reload")
@@ -111,6 +132,7 @@ omarchy_startup_cursor = {
 }
 command = nil
 omarchy_startup_cursor_restore(true)
+reveal()
 assert(not config.invisible and config.sync_gsettings_theme)
 assert(command:match("setcursor 'my%-xcursor'"), "restore the Xcursor fallback when the Hyprcursor theme is unset")
 assert(not io.open(state_file, "r"), "the fallback reveal must drop its capture too")
@@ -140,6 +162,7 @@ events["config.reloaded"]()
 local other_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor-test-instance-b.state"
 assert(io.open(other_file, "r") and io.open(state_file, "r"), "two startups must keep separate captures")
 omarchy_startup_cursor_restore(true)
+reveal()
 assert(not io.open(other_file, "r") and io.open(state_file, "r"), "revealing B must not remove A's capture")
 env.HYPRLAND_INSTANCE_SIGNATURE = "test-instance-a"
 env.OMARCHY_STARTUP_CURSOR = "test-instance-a:pending"
@@ -150,6 +173,7 @@ monitors = { {} }
 events["config.reloaded"]()
 assert(omarchy_startup_cursor.xcursor == "cursor-a" and omarchy_startup_cursor.path == "/icons-a", "A must recover its own cursor after B reveals")
 omarchy_startup_cursor_restore(true)
+reveal()
 
 -- A leftover capture in a healthy session (e.g. from a crash before the
 -- reveal) must never hide the pointer of a later reload.
@@ -172,6 +196,7 @@ omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
 events["config.reloaded"]()
 assert(not snapshot_executed and omarchy_startup_cursor.xcursor == "safe-theme", "executable or invalid snapshots must fall back without executing their content")
 omarchy_startup_cursor_restore(true)
+reveal()
 
 -- Escaped separators and percent signs round-trip without splitting records.
 env.XCURSOR_THEME, env.XCURSOR_PATH = "theme%=value", "/icons%\nwith\rnewlines=here"
@@ -184,6 +209,7 @@ monitors = { {} }
 events["config.reloaded"]()
 assert(omarchy_startup_cursor.xcursor == "theme%=value" and omarchy_startup_cursor.path == "/icons%\nwith\rnewlines=here", "snapshot escaping must preserve cursor strings exactly across reloads")
 omarchy_startup_cursor_restore(true)
+reveal()
 
 for _, invalid in ipairs({ "xcursor=bad%escape", "xcursor=injected\nxcursor=duplicate" }) do
   local file = assert(io.open(state_file, "w"))
@@ -195,6 +221,7 @@ for _, invalid in ipairs({ "xcursor=bad%escape", "xcursor=injected\nxcursor=dupl
   events["config.reloaded"]()
   assert(omarchy_startup_cursor.xcursor == "safe-theme", "malformed escapes and duplicate fields must invalidate the snapshot")
   omarchy_startup_cursor_restore(true)
+  reveal()
 end
 
 local popen = io.popen
@@ -236,12 +263,15 @@ assert(load(completion))()
 assert(omarchy_startup_cursor_pending, "a stale completion must not acknowledge a different cursor size")
 omarchy_startup_cursor.size = old_size
 omarchy_startup_cursor_restore(true)
+reveal()
 assert(not config.invisible and config.sync_gsettings_theme)
 assert(orphan(nil) == "custom-cursor", "recover a nonblank user GSettings theme when no snapshot survives")
 omarchy_startup_cursor_restore(true)
+reveal()
 gsettings = "'omarchy-startup'\n"
 assert(orphan(nil) == "default", "a destroyed user preference must fall back to the default alias, never the blank theme")
 omarchy_startup_cursor_restore(true)
+reveal()
 omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
 monitors = {}
 env.XCURSOR_THEME, env.XCURSOR_PATH = "next-theme", "/next/icons"

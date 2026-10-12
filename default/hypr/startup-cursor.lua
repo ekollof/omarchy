@@ -108,15 +108,24 @@ function omarchy_startup_cursor_restore(loaded)
   if not omarchy_startup_cursor_pending then return end
   local cursor = omarchy_startup_cursor
   if loaded then
-    omarchy_startup_cursor_pending = false
-    hl.env(phase_key, done_phase)
-    hl.env("OMARCHY_STARTUP_CURSOR_SESSION", "")
-    hl.env("OMARCHY_STARTUP_CURSOR_THEME", "")
-    hl.config({ cursor = cursor.config })
-    hl.exec_cmd("xsetroot -cursor_name left_ptr >/dev/null 2>&1 || true")
-    local theme = (cursor.config.enable_hyprcursor and cursor.hyprcursor and cursor.hyprcursor ~= "" and cursor.hyprcursor) or cursor.xcursor
-    hl.exec_cmd("hyprctl setcursor " .. o.shell_quote(theme) .. " " .. cursor.size)
-    omarchy_startup_cursor_drop()
+    if cursor.revealing then return end
+    cursor.revealing = true
+    -- The pointer only picks up the restored theme when it is shown again, and
+    -- the compositor checks cursor.invisible every 500ms, so hide it past one check.
+    -- The reveal stays recorded until then, since a reload discards this timer.
+    hl.config({ cursor = { invisible = true } })
+    hl.timer(function()
+      if not omarchy_startup_cursor_pending or omarchy_startup_cursor ~= cursor then return end
+      omarchy_startup_cursor_pending = false
+      hl.env(phase_key, done_phase)
+      hl.env("OMARCHY_STARTUP_CURSOR_SESSION", "")
+      hl.env("OMARCHY_STARTUP_CURSOR_THEME", "")
+      hl.config({ cursor = cursor.config })
+      hl.exec_cmd("xsetroot -cursor_name left_ptr >/dev/null 2>&1 || true")
+      local theme = (cursor.config.enable_hyprcursor and cursor.hyprcursor and cursor.hyprcursor ~= "" and cursor.hyprcursor) or cursor.xcursor
+      hl.exec_cmd("hyprctl setcursor " .. o.shell_quote(theme) .. " " .. cursor.size)
+      omarchy_startup_cursor_drop()
+    end, { timeout = 600, type = "oneshot" })
   elseif not cursor.restoring then
     -- Reload the normal Xcursor fallback before enabling Hyprcursor or GSettings.
     cursor.restoring = true

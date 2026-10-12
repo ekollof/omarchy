@@ -18,6 +18,11 @@ import tempfile
 import time
 
 root = pathlib.Path(os.environ["ROOT"])
+reload_during_reveal = os.environ.get("CURSOR_TEST_RELOAD_DURING_REVEAL") == "1"
+evidence = os.environ.get("CURSOR_TEST_EVIDENCE_DIR")
+if evidence:
+  evidence = pathlib.Path(evidence)
+  evidence.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory() as directory:
   stage = pathlib.Path(directory)
   home = stage / "home"
@@ -49,16 +54,28 @@ with tempfile.TemporaryDirectory() as directory:
       time.sleep(0.005)
     display, signature = (stage / "session").read_text().splitlines()
     env.update(WAYLAND_DISPLAY=display, HYPRLAND_INSTANCE_SIGNATURE=signature)
+    # Only the cursor has green in it. The cover is black and the desktop
+    # magenta, which can show at part opacity while its panel fades in.
+    screenshot = stage / "frame.png"
+    frames = []
+    def cursor_pixels():
+      subprocess.run(["grim", "-c", str(screenshot)], env=env, check=True,
+               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+      if evidence:
+        frame = evidence / ("frame-%03d.png" % len(frames))
+        frame.write_bytes(screenshot.read_bytes())
+        frames.append((frame.name, time.monotonic()))
+      green = subprocess.check_output(["magick", str(screenshot), "-channel", "G", "-separate", "-threshold", "0", "-format", "%[fx:mean*w*h]", "info:"], text=True, timeout=5)
+      return float(green)
+
     # Capture immediately, including before Quickshell loads its cover. The
     # fixture cannot reveal while grim or magick is busy taking these frames.
     deadline = time.monotonic() + 5
     for sample in range(3):
       assert time.monotonic() < deadline, "initial compositor captures timed out"
-      screenshot = stage / "frame.png"
-      subprocess.run(["grim", "-c", str(screenshot)], env=env, check=True,
-               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-      maximum = subprocess.check_output(["magick", str(screenshot), "-format", "%[fx:maxima]", "info:"], text=True, timeout=5)
-      assert maximum == "0", "the cursor appeared in the first compositor frames"
+      assert cursor_pixels() == 0, "the cursor appeared in the first compositor frames"
+    if evidence:
+      (evidence / "hidden.png").write_bytes(screenshot.read_bytes())
 
     def wait_phase(expected):
       deadline = time.monotonic() + 5
@@ -76,19 +93,55 @@ with tempfile.TemporaryDirectory() as directory:
     assert (stage / "pending").read_text() == "true", "reload after application startup lost the pending reveal"
     (stage / "release").write_text("reveal")
     wait_phase("revealed")
+    if reload_during_reveal:
+      deadline = time.monotonic() + 5
+      while True:
+        subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/redraw", "w")); f:write(tostring(omarchy_startup_cursor and omarchy_startup_cursor.revealing)); f:close()'],
+                 env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
+        if (stage / "redraw").read_text() == "true":
+          break
+        assert time.monotonic() < deadline, "never observed the delayed redraw window"
+      subprocess.run(["hyprctl", "reload"], env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
+      subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/pending", "w")); f:write(tostring(omarchy_startup_cursor_pending) .. "\\n" .. tostring(omarchy_startup_cursor and omarchy_startup_cursor.xcursor)); f:close()'],
+               env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
+      assert (stage / "pending").read_text() == "true\nAdwaita", "reload during redraw lost the pending reveal or original theme"
     # Cursor visibility is polled by the compositor independently of the fade.
-    deadline = time.monotonic() + 5
+    # Losing the redraw timer must recover through the production 15s fallback.
+    deadline = time.monotonic() + (20 if reload_during_reveal else 5)
     while True:
-      subprocess.run(["grim", "-c", str(screenshot)], env=env, check=True,
-               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-      green = subprocess.check_output(["magick", str(screenshot), "-channel", "G", "-separate", "-threshold", "0", "-format", "%[fx:mean*w*h]", "info:"], text=True, timeout=5)
-      if float(green) > 20:
+      if cursor_pixels() > 20:
         break
       assert time.monotonic() < deadline, "the normal cursor did not return with the desktop"
+    if evidence:
+      (evidence / "revealed.png").write_bytes(screenshot.read_bytes())
+    subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/done", "w")); f:write(tostring(omarchy_startup_cursor_pending) .. "\\n" .. tostring(os.getenv("OMARCHY_STARTUP_CURSOR"))); f:close()'],
+             env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
+    assert (stage / "done").read_text() == "false\n" + signature + ":done", "visible cursor must finish the instance phase"
+    capture = pathlib.Path(env["XDG_RUNTIME_DIR"]) / ("omarchy-startup-cursor-" + signature + ".state")
+    assert not capture.exists(), "completed redraw left a stale capture"
+    subprocess.run(["hyprctl", "reload"], env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
+    assert cursor_pixels() > 20, "a healthy reload hid the restored cursor"
+    if evidence:
+      # Keep the captured frames and their actual intervals as a short recording.
+      timeline = evidence / "frames.ffconcat"
+      with timeline.open("w") as output:
+        output.write("ffconcat version 1.0\n")
+        for index, (name, timestamp) in enumerate(frames):
+          duration = frames[index + 1][1] - timestamp if index + 1 < len(frames) else 1
+          output.write("file '%s'\nduration %.6f\n" % (name, duration))
+        output.write("file '%s'\n" % frames[-1][0])
+      subprocess.run(["ffmpeg", "-v", "error", "-y", "-safe", "0", "-i", str(timeline), "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-pix_fmt", "yuv420p", str(evidence / "reveal.mp4")], check=True, timeout=30)
+    print("cursor visible; phase done; snapshot removed; healthy reload preserved visibility; redraw reload=" + str(reload_during_reveal))
   except Exception:
     print((stage / "compositor.log").read_text())
     raise
   finally:
+    # Stop Quickshell before its compositor: losing the display makes it abort,
+    # and the crash watcher reports that abort as a crash.
+    subprocess.run(["pkill", "-TERM", "-f", "quickshell -p " + str(stage)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and subprocess.run(["pgrep", "-f", "quickshell -p " + str(stage)], stdout=subprocess.DEVNULL).returncode == 0:
+      time.sleep(0.05)
     os.killpg(compositor.pid, signal.SIGTERM)
     compositor.wait(timeout=10)
     log.close()
