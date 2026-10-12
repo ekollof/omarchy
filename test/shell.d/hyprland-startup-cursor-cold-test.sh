@@ -92,19 +92,19 @@ with tempfile.TemporaryDirectory() as directory:
              env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
     assert (stage / "pending").read_text() == "true", "reload after application startup lost the pending reveal"
     (stage / "release").write_text("reveal")
-    wait_phase("revealed")
     if reload_during_reveal:
       deadline = time.monotonic() + 5
-      while True:
-        subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/redraw", "w")); f:write(tostring(omarchy_startup_cursor and omarchy_startup_cursor.revealing)); f:close()'],
-                 env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
-        if (stage / "redraw").read_text() == "true":
-          break
-        assert time.monotonic() < deadline, "never observed the delayed redraw window"
+      while not (stage / "redraw-held").exists():
+        assert compositor.poll() is None and time.monotonic() < deadline, "never reached the held redraw window"
+        time.sleep(0.01)
+      capture = pathlib.Path(env["XDG_RUNTIME_DIR"]) / ("omarchy-startup-cursor-" + signature + ".state")
+      assert capture.exists(), "the held redraw must still have its saved settings"
       subprocess.run(["hyprctl", "reload"], env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
+      (stage / "redraw-reloaded").write_text("resume")
       subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/pending", "w")); f:write(tostring(omarchy_startup_cursor_pending) .. "\\n" .. tostring(omarchy_startup_cursor and omarchy_startup_cursor.xcursor)); f:close()'],
                env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
       assert (stage / "pending").read_text() == "true\nAdwaita", "reload during redraw lost the pending reveal or original theme"
+    wait_phase("revealed")
     # Cursor visibility is polled by the compositor independently of the fade.
     # Losing the redraw timer must recover through the production 15s fallback.
     deadline = time.monotonic() + (20 if reload_during_reveal else 5)
