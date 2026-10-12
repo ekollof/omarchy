@@ -40,7 +40,7 @@ local done_phase = instance .. ":done"
 local function omarchy_startup_cursor_state_path()
   local runtime = os.getenv("XDG_RUNTIME_DIR")
   if not runtime or runtime == "" or instance == "" or instance:find("[^%w_-]") then return nil end
-  return runtime .. "/omarchy-startup-cursor-" .. instance .. ".lua"
+  return runtime .. "/omarchy-startup-cursor-" .. instance .. ".state"
 end
 
 local function omarchy_startup_cursor_save(cursor)
@@ -48,15 +48,19 @@ local function omarchy_startup_cursor_save(cursor)
   if not path then return end
   local file = io.open(path, "w")
   if not file then return end
-  file:write("return {\n")
-  file:write("invisible = " .. tostring(cursor.config.invisible) .. ",\n")
-  file:write("enable_hyprcursor = " .. tostring(cursor.config.enable_hyprcursor) .. ",\n")
-  file:write("sync_gsettings_theme = " .. tostring(cursor.config.sync_gsettings_theme) .. ",\n")
-  file:write("hyprcursor = " .. (cursor.hyprcursor and string.format("%q", cursor.hyprcursor) or "nil") .. ",\n")
-  file:write("size = " .. tostring(cursor.size) .. ",\n")
-  file:write("path = " .. string.format("%q", cursor.path) .. ",\n")
-  file:write("xcursor = " .. string.format("%q", cursor.xcursor) .. ",\n")
-  file:write("}\n")
+  local saved = {
+    invisible = tostring(cursor.config.invisible),
+    enable_hyprcursor = tostring(cursor.config.enable_hyprcursor),
+    sync_gsettings_theme = tostring(cursor.config.sync_gsettings_theme),
+    hyprcursor = cursor.hyprcursor or "",
+    size = tostring(cursor.size),
+    path = cursor.path,
+    xcursor = cursor.xcursor,
+  }
+  for _, key in ipairs({ "invisible", "enable_hyprcursor", "sync_gsettings_theme", "hyprcursor", "size", "path", "xcursor" }) do
+    local value = saved[key]:gsub("[%%\r\n]", function(char) return string.format("%%%02X", string.byte(char)) end)
+    file:write(key .. "=" .. value .. "\n")
+  end
   file:close()
 end
 
@@ -68,20 +72,33 @@ end
 local function omarchy_startup_cursor_load()
   local path = omarchy_startup_cursor_state_path()
   if not path then return nil end
-  local chunk = loadfile(path)
-  if not chunk then return nil end
-  local ok, saved = pcall(chunk)
-  if not ok or type(saved) ~= "table" then return nil end
-  if type(saved.xcursor) ~= "string" or saved.xcursor == "" or saved.xcursor == "omarchy-startup" then return nil end
-  if type(saved.path) ~= "string" or saved.path == "" then return nil end
+  local file = io.open(path, "r")
+  if not file then return nil end
+  local saved = {}
+  for line in file:lines() do
+    local key, value = line:match("^([%w_]+)=(.*)$")
+    if not key or saved[key] or value:gsub("%%(%x%x)", ""):find("%%") then
+      file:close()
+      return nil
+    end
+    saved[key] = value:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end)
+  end
+  file:close()
+  for _, key in ipairs({ "invisible", "enable_hyprcursor", "sync_gsettings_theme" }) do
+    if saved[key] ~= "true" and saved[key] ~= "false" then return nil end
+  end
+  if not saved.xcursor or saved.xcursor == "" or saved.xcursor == "omarchy-startup" then return nil end
+  if not saved.path or saved.path == "" then return nil end
+  local size = tonumber(saved.size)
+  if not size or size <= 0 or size == math.huge then return nil end
   return {
     config = {
-      invisible = saved.invisible == true,
-      enable_hyprcursor = saved.enable_hyprcursor == true,
-      sync_gsettings_theme = saved.sync_gsettings_theme ~= false,
+      invisible = saved.invisible == "true",
+      enable_hyprcursor = saved.enable_hyprcursor == "true",
+      sync_gsettings_theme = saved.sync_gsettings_theme == "true",
     },
-    hyprcursor = (type(saved.hyprcursor) == "string" and saved.hyprcursor ~= "") and saved.hyprcursor or nil,
-    size = (type(saved.size) == "number" and saved.size > 0) and saved.size or 24,
+    hyprcursor = saved.hyprcursor ~= "" and saved.hyprcursor or nil,
+    size = size,
     path = saved.path,
     xcursor = saved.xcursor,
   }

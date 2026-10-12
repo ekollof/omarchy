@@ -53,7 +53,7 @@ events["config.reloaded"]()
 assert(config.invisible and not config.enable_hyprcursor and not config.sync_gsettings_theme)
 assert(env.XCURSOR_THEME == "omarchy-startup" and env.XCURSOR_PATH:match("/default/hypr/cursors:/my/icons$"))
 assert(omarchy_startup_cursor_pending, "the first compositor frame must use the blank cursor")
-local state_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor-test-instance-a.lua"
+local state_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor-test-instance-a.state"
 assert(io.open(state_file, "r"), "the capture must survive a reload that wipes Lua state")
 
 -- A reload while the restore is pending (e.g. monitor-watch recovering a
@@ -124,7 +124,7 @@ assert(not omarchy_startup_cursor_pending and not config.invisible, "a completed
 
 -- An independent compositor must not overwrite or remove A's capture.
 local capture = assert(io.open(state_file, "w"))
-capture:write("return { xcursor = 'cursor-a', path = '/icons-a', size = 24 }\n")
+capture:write("xcursor=cursor-a\npath=/icons-a\nsize=24\ninvisible=false\nenable_hyprcursor=true\nsync_gsettings_theme=true\nhyprcursor=\n")
 capture:close()
 env.HYPRLAND_INSTANCE_SIGNATURE = "test-instance-b"
 env.OMARCHY_STARTUP_CURSOR = "test-instance-a:pending"
@@ -137,7 +137,7 @@ assert(not omarchy_startup_cursor_pending and io.open(state_file, "r"), "a healt
 omarchy_startup_cursor_pending = nil
 monitors = {}
 events["config.reloaded"]()
-local other_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor-test-instance-b.lua"
+local other_file = os.getenv("XDG_RUNTIME_DIR") .. "/omarchy-startup-cursor-test-instance-b.state"
 assert(io.open(other_file, "r") and io.open(state_file, "r"), "two startups must keep separate captures")
 omarchy_startup_cursor_restore(true)
 assert(not io.open(other_file, "r") and io.open(state_file, "r"), "revealing B must not remove A's capture")
@@ -154,13 +154,48 @@ omarchy_startup_cursor_restore(true)
 -- A leftover capture in a healthy session (e.g. from a crash before the
 -- reveal) must never hide the pointer of a later reload.
 local stale = io.open(state_file, "w")
-stale:write("return { xcursor = 'my-xcursor', path = '/my/icons', size = 24 }\n")
+stale:write("xcursor=my-xcursor\npath=/my/icons\nsize=24\ninvisible=false\nenable_hyprcursor=true\nsync_gsettings_theme=true\nhyprcursor=\n")
 stale:close()
 omarchy_startup_cursor_pending = nil
 monitors = { {} }
 events["config.reloaded"]()
 assert(not omarchy_startup_cursor_pending and not config.invisible, "installing the fix in a running compositor must leave its cursor alone")
 assert(not io.open(state_file, "r"), "a healthy reload must drop a stale capture")
+
+-- Snapshot content is data, never a Lua program, even in a pending session.
+local malicious = assert(io.open(state_file, "w"))
+malicious:write("_G.snapshot_executed = true; return { xcursor = 'injected', path = '/injected', size = 24 }\n")
+malicious:close()
+env.OMARCHY_STARTUP_CURSOR = "test-instance-a:pending"
+env.XCURSOR_THEME, env.XCURSOR_PATH = "safe-theme", "/safe/icons"
+omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
+events["config.reloaded"]()
+assert(not snapshot_executed and omarchy_startup_cursor.xcursor == "safe-theme", "executable or invalid snapshots must fall back without executing their content")
+omarchy_startup_cursor_restore(true)
+
+-- Escaped separators and percent signs round-trip without splitting records.
+env.XCURSOR_THEME, env.XCURSOR_PATH = "theme%=value", "/icons%\nwith\rnewlines=here"
+env.OMARCHY_STARTUP_CURSOR = "old-session:done"
+omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
+monitors = {}
+events["config.reloaded"]()
+omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
+monitors = { {} }
+events["config.reloaded"]()
+assert(omarchy_startup_cursor.xcursor == "theme%=value" and omarchy_startup_cursor.path == "/icons%\nwith\rnewlines=here", "snapshot escaping must preserve cursor strings exactly across reloads")
+omarchy_startup_cursor_restore(true)
+
+for _, invalid in ipairs({ "xcursor=bad%escape", "xcursor=injected\nxcursor=duplicate" }) do
+  local file = assert(io.open(state_file, "w"))
+  file:write(invalid .. "\npath=/injected\nsize=24\ninvisible=false\nenable_hyprcursor=true\nsync_gsettings_theme=true\n")
+  file:close()
+  env.XCURSOR_THEME, env.XCURSOR_PATH = "safe-theme", "/safe/icons"
+  env.OMARCHY_STARTUP_CURSOR = "test-instance-a:pending"
+  omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
+  events["config.reloaded"]()
+  assert(omarchy_startup_cursor.xcursor == "safe-theme", "malformed escapes and duplicate fields must invalidate the snapshot")
+  omarchy_startup_cursor_restore(true)
+end
 
 local popen = io.popen
 local gsettings = "'custom-cursor'\n"
