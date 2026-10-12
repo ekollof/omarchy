@@ -120,7 +120,13 @@ with tempfile.TemporaryDirectory() as directory:
     capture = pathlib.Path(env["XDG_RUNTIME_DIR"]) / ("omarchy-startup-cursor-" + signature + ".state")
     assert not capture.exists(), "completed redraw left a stale capture"
     subprocess.run(["hyprctl", "reload"], env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
-    assert cursor_pixels() > 20, "a healthy reload hid the restored cursor"
+    subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/healthy", "w")); f:write(tostring(omarchy_startup_cursor_pending) .. "\\n" .. tostring(hl.get_config("cursor.invisible"))); f:close()'],
+             env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
+    assert (stage / "healthy").read_text() == "false\nfalse", "a healthy reload restarted cursor hiding"
+    # Wait for a rendered frame after reload rather than sampling its transition.
+    deadline = time.monotonic() + 5
+    while cursor_pixels() <= 20:
+      assert time.monotonic() < deadline, "a healthy reload left the restored cursor invisible"
     if evidence:
       # Keep the captured frames and their actual intervals as a short recording.
       timeline = evidence / "frames.ffconcat"
