@@ -161,4 +161,24 @@ const plugin: TuiPlugin = async (api) => {
 export default {
   id: "omarchy-theme",
   tui: plugin,
+  // OpenCode 2 uses setup/cleanup and exposes resolved theme tokens rather
+  // than the old install/set API. Its SIGUSR2 listener refreshes custom theme
+  // files without reloading server instances. Emit locally: never signal the
+  // shared server, which has no TUI theme handler.
+  setup() {
+    const dir = themesDir()
+    fs.mkdirSync(dir, { recursive: true })
+    let pending: ReturnType<typeof setTimeout> | undefined
+    const watcher = fs.watch(dir, () => {
+      if (pending) clearTimeout(pending)
+      pending = setTimeout(() => {
+        pending = undefined
+        process.emit("SIGUSR2")
+      }, DEBOUNCE_MS)
+    })
+    return () => {
+      if (pending) clearTimeout(pending)
+      watcher.close()
+    }
+  },
 }
