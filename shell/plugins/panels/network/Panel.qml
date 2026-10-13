@@ -357,7 +357,7 @@ Panel {
   onPasswordSsidChanged: {
     if (passwordSsid === "" && opened) {
       passwordText = ""
-      Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+      Qt.callLater(function() { if (panel.loadedContent) panel.loadedContent.forceActiveFocus() })
     }
   }
 
@@ -527,7 +527,7 @@ Panel {
   }
   onRestrictedChanged: {
     connectionPhraseSwap.stop()
-    heroMeta.opacity = 1.0
+    if (panel.loadedContent) panel.loadedContent.heroMeta.opacity = 1.0
   }
 
   function checkConnectivity() {
@@ -1030,14 +1030,14 @@ Panel {
   SequentialAnimation {
     id: connectionPhraseSwap
     PropertyAnimation {
-      target: heroMeta; property: "opacity"
+      target: panel.loadedContent ? panel.loadedContent.heroMeta : null; property: "opacity"
       to: 0.0; duration: Style.duration(180); easing.type: Easing.OutQuad
     }
     ScriptAction {
       script: root.connectionPhraseIndex = (root.connectionPhraseIndex + 1) % root.connectionPhrases.length
     }
     PropertyAnimation {
-      target: heroMeta; property: "opacity"
+      target: panel.loadedContent ? panel.loadedContent.heroMeta : null; property: "opacity"
       to: 1.0; duration: Style.duration(260); easing.type: Easing.InQuad
     }
   }
@@ -1047,7 +1047,7 @@ Panel {
     function onInfoChanged() {
       if (!(root.info.type === "ethernet" || (root.info.type === "wifi" && root.canDisconnect))) {
         connectionPhraseSwap.stop()
-        heroMeta.opacity = 1.0
+        if (panel.loadedContent) panel.loadedContent.heroMeta.opacity = 1.0
       }
     }
   }
@@ -1105,15 +1105,17 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: keyCatcher
+    focusTarget: panel.loadedContent
     contentWidth: panel.fittedContentWidth(Style.space(380))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight)
+    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight)
 
     // Catches all unhandled keys for keyboard navigation. AfterItem priority
     // lets the passphrase TextField (a child via focus chain) get its keys
     // first; only events the focused subtree ignores bubble back here.
-    PanelKeyCatcher {
+    content: PanelKeyCatcher {
       id: keyCatcher
+      property alias heroMeta: heroMeta
+      implicitHeight: column.implicitHeight
       anchors.fill: parent
       // Freeze the cursor model while the inline password prompt is open;
       // the TextField inside owns input until Esc/Enter/Cancel.
@@ -1246,32 +1248,28 @@ Panel {
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
 
-          Button {
+          PanelActionButton {
             id: qrAction
             visible: root.canShareWifi
             iconText: "󰐲"
             tooltipText: "Show QR code"
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
-            iconSize: Style.font.subtitle * 1.5
-            horizontalPadding: Style.space(5)
-            verticalPadding: Style.space(2)
+            fontSize: Style.font.subtitle * 1.5
             hasCursor: root.qrHeaderHasCursor
             Layout.alignment: Qt.AlignVCenter
             onHovered: function(on) { if (on) root.setHeaderCursor(root.qrHeaderIndex) }
             onClicked: root.summonWifiQr()
           }
 
-          Button {
+          PanelActionButton {
             id: speedAction
             visible: root.canRunSpeedTest
             iconText: "󰓅"
             tooltipText: "Run a speed test"
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
-            iconSize: Style.font.subtitle * 1.5
-            horizontalPadding: Style.space(5)
-            verticalPadding: Style.space(2)
+            fontSize: Style.font.subtitle * 1.5
             hasCursor: root.speedHeaderHasCursor
             Layout.alignment: Qt.AlignVCenter
             onHovered: function(on) { if (on) root.setHeaderCursor(root.speedHeaderIndex) }
