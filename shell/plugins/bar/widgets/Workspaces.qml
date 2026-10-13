@@ -37,6 +37,24 @@ BarWidget {
     root.bar.run("hyprctl dispatch " + Util.shellQuote("hl.dsp.focus({ workspace = \"" + id + "\" })"))
   }
 
+  // A wheel notch moves one entry along the row, and a touchpad adds up its
+  // smaller deltas until they make a notch's worth.
+  property real wheelAccumulator: 0
+
+  function scrollWorkspaces(delta) {
+    var wheel = Util.wheelSteps(root.wheelAccumulator, delta)
+    root.wheelAccumulator = wheel.remainder
+    if (wheel.steps === 0) return
+
+    // Holds at either end rather than wrapping, so a touchpad swipe that runs
+    // long stops on the last workspace.
+    var ids = root.workspaceIds()
+    var index = ids.indexOf(root.focusedWorkspaceId())
+    if (index === -1) return
+    var target = ids[Util.clamp(index - wheel.steps, 0, ids.length - 1)]
+    if (target !== ids[index]) root.focusWorkspace(target)
+  }
+
   // Qtile/Xmonad-style tag behavior: show the workspace on the monitor whose
   // bar was clicked, swapping it away from another monitor if needed. The
   // dispatcher cannot combine `monitor` with `workspace`, so focus the clicked
@@ -75,12 +93,41 @@ BarWidget {
     return "\uDB85\uDCFB"
   }
 
-  function refresh() {
+  // A layout only changes through the layout commands, which ask for a refresh,
+  // or a config reload, so each workspace's mode is read once and cached rather
+  // than running the script on every workspace switch.
+  property var modeCache: ({})
+  property int modeGeneration: 0
+  property int modeProcWorkspace: -1
+  property int modeProcGeneration: 0
+
+  function focusedWorkspaceId() {
+    return Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : -1
+  }
+
+  function showFocusedMode() {
+    var mode = root.modeCache[root.focusedWorkspaceId()]
+    if (mode !== undefined) root.focusedMode = mode
+    else readMode()
+  }
+
+  function readMode() {
     if (modeProc.running) {
       root.modeStale = true
       return
     }
+    var id = root.focusedWorkspaceId()
+    if (id === -1) return
+    root.modeProcWorkspace = id
+    root.modeProcGeneration = root.modeGeneration
+    modeProc.command = ["omarchy-hyprland-workspace-layout-current", String(id)]
     modeProc.running = true
+  }
+
+  function refresh() {
+    root.modeCache = ({})
+    root.modeGeneration++
+    readMode()
   }
 
   function cycleLayout() {
@@ -91,22 +138,28 @@ BarWidget {
 
   Connections {
     target: Hyprland
-    function onFocusedWorkspaceChanged() { root.refresh() }
+    function onFocusedWorkspaceChanged() { root.showFocusedMode() }
+    function onRawEvent(event) {
+      if (event && String(event.name) === "configreloaded") root.refresh()
+    }
   }
 
   Process {
     id: modeProc
-    command: ["omarchy-hyprland-workspace-layout-current"]
     stdout: StdioCollector {
       onStreamFinished: {
         var mode = text.trim()
-        if (mode) root.focusedMode = mode
+        // A read that started before a refresh may predate the change.
+        if (!mode || root.modeProcGeneration !== root.modeGeneration) return
+        root.modeCache[root.modeProcWorkspace] = mode
+        if (root.modeProcWorkspace === root.focusedWorkspaceId()) root.focusedMode = mode
       }
     }
     onExited: {
       if (!root.modeStale) return
       root.modeStale = false
-      root.refresh()
+      // Deferred: the process still reports running while it signals exit.
+      Qt.callLater(root.showFocusedMode)
     }
   }
 
@@ -153,6 +206,7 @@ BarWidget {
           else if (focused) root.cycleLayout()
           else root.focusWorkspace(modelData)
         }
+        onWheelMoved: function(delta) { root.scrollWorkspaces(delta) }
       }
     }
   }
