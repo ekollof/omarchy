@@ -406,6 +406,7 @@ function positiveNumber(value) {
 function paintedExtent(snapshot) {
   var s = snapshot || {}
   if (s.vertical) {
+    if (positiveNumber(s.groupPaintedHeight) > 0) return positiveNumber(s.groupPaintedHeight)
     if (positiveNumber(s.glyphPaintedHeight) > 0) return positiveNumber(s.glyphPaintedHeight)
     if (positiveNumber(s.iconPaintedHeight) > 0) return positiveNumber(s.iconPaintedHeight)
     if (positiveNumber(s.labelTightHeight) > 0) return positiveNumber(s.labelTightHeight)
@@ -417,6 +418,7 @@ function paintedExtent(snapshot) {
     if (positiveNumber(s.opticalSize) > 0) return positiveNumber(s.opticalSize)
     return positiveNumber(s.contentHeight)
   }
+  if (positiveNumber(s.groupPaintedWidth) > 0) return positiveNumber(s.groupPaintedWidth)
   if (positiveNumber(s.glyphPaintedWidth) > 0) return positiveNumber(s.glyphPaintedWidth)
   if (positiveNumber(s.iconPaintedWidth) > 0) return positiveNumber(s.iconPaintedWidth)
   if (positiveNumber(s.labelTightWidth) > 0) return positiveNumber(s.labelTightWidth)

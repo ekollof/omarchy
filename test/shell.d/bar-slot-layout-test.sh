@@ -38,6 +38,12 @@ ShellRoot {
       if (!slot.activeItem || !(slot.paintedExtent > 0)) throw new Error("slot did not load: " + slot.moduleName)
       count++
       var item = slot.activeItem
+      if (slot.moduleName === "battery") {
+        var expectedPaint = host.vertical ? Math.max(item.canvasSize, host.batteryMetrics.height)
+          : item.canvasSize + host.batteryMetrics.width + Style.space(4)
+        if (Math.abs(slot.paintedExtent - expectedPaint) > 1.01)
+          throw new Error("battery percentage group is measured as only its icon: " + slot.paintedExtent + " expected " + expectedPaint)
+      }
       if (slot.moduleName === "commandIcon") {
         var ink = host.vertical ? item.iconPaintedHeight : item.iconPaintedWidth
         if (!(ink > 0) || Math.abs(slot.paintedExtent - ink) > 0.05)
@@ -93,6 +99,9 @@ ShellRoot {
     property var activePopout: null
     property string omarchyPath: ""
     readonly property var layoutItem: layoutLoader.item
+    readonly property var batteryMetrics: batteryLabelMetrics
+    TextMetrics { id: batteryLabelMetrics; text: "100%"; font.family: Style.font.family; font.pixelSize: Style.bar.iconFont }
+    Component { id: battery; BarIconButton { text: "B"; labelText: "100%" } }
     function entryId(entry) { return entry.id }
     function entrySettings(entry) { return entry.settings || {} }
     function customModuleType(entry) { return "" }
@@ -107,7 +116,7 @@ ShellRoot {
     function moduleClickTargetAt(slot, x, y) { return null }
     function pressModuleClickTarget(slot, button, x, y) { return false }
     property QtObject barWidgetRegistry: QtObject {
-      property var widgets: ({ glyph: { component: glyph }, commandIcon: { component: commandIcon }, pill: { component: pill }, vector: { component: vector }, wrapped: { component: wrapped }, stack: { component: stack } })
+      property var widgets: ({ glyph: { component: glyph }, battery: { component: battery }, commandIcon: { component: commandIcon }, pill: { component: pill }, vector: { component: vector }, wrapped: { component: wrapped }, stack: { component: stack } })
       function metadataFor(id) { return { firstParty: true } }
     }
     Component { id: glyph; BarIconButton { text: "x" } }
@@ -118,7 +127,7 @@ ShellRoot {
     Component { id: stack; WidgetButton { text: "A\nB" } }
     Component { id: emptyModuleComponent; Item {} }
     component CustomCommandModule: Item { required property var entry }
-    readonly property var entries: [{ id: "glyph" }, { id: "commandIcon" }, { id: "pill" }, { id: "vector" }, { id: "wrapped" }, { id: "stack" }]
+    readonly property var entries: [{ id: "glyph" }, { id: "battery" }, { id: "commandIcon" }, { id: "pill" }, { id: "vector" }, { id: "wrapped" }, { id: "stack" }]
     Loader {
       id: layoutLoader
       sourceComponent: root.vertical ? columnLayout : rowLayout

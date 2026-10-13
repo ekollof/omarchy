@@ -2079,6 +2079,8 @@ Item {
         : ("iconContentItem" in item)
         ? BarModel.vectorPaintedExtent(item.iconContentItem) : null
       return BarModel.paintedExtent({
+        groupPaintedWidth: ("groupPaintedWidth" in item) ? item.groupPaintedWidth : 0,
+        groupPaintedHeight: ("groupPaintedHeight" in item) ? item.groupPaintedHeight : 0,
         vertical: root.vertical,
         glyphPaintedWidth: ("glyphPaintedWidth" in item) ? item.glyphPaintedWidth : 0,
         glyphPaintedHeight: ("glyphPaintedHeight" in item) ? item.glyphPaintedHeight : 0,

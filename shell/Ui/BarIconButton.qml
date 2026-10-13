@@ -12,6 +12,10 @@ WidgetButton {
   readonly property real visualIconSize: Style.bar.iconSize
   readonly property real canvasSize: Math.max(visualIconSize, opticalSize)
   property string labelText: ""
+  // The optional label and icon form one centered group. Its label advance
+  // and icon canvas bound all paint, including when the group exceeds the slot.
+  readonly property real groupPaintedWidth: label.visible ? content.width : 0
+  readonly property real groupPaintedHeight: label.visible ? Math.max(content.height, label.height) : 0
   property bool debugOpticalBounds: Quickshell.env("OMARCHY_DEBUG_BAR_ICONS") === "1"
   // A label shifts the icon within the centered group.
   readonly property real opticalCenterErrorX:
