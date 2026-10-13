@@ -127,3 +127,43 @@ pass "notification card has no hardcoded text font literals left"
 grep -q 'font.family: root.fontFamily' <<<"$card_qml" \
   || fail "notification card keeps glyphs on the system font"
 pass "notification card keeps glyphs on the system font"
+
+# Execute the production font-resolution expressions, not a parallel resolver.
+node <<'JS'
+const fs = require('fs')
+const assert = require('assert')
+const source = fs.readFileSync(process.env.ROOT + '/shell/plugins/notifications/Service.qml', 'utf8')
+function expression(name) {
+  const start = source.indexOf('readonly property string ' + name + ': {')
+  assert(start >= 0, name)
+  const body = source.slice(start).split(': {')[1].split('\n  }')[0]
+  return new Function('shell', 'service', 'Style', 'Commons', body)
+}
+const setting = expression('notificationFontSetting')
+const resolve = expression('notificationTextFontFamily')
+const shell = { shellConfig: {}, bar: { fontFamily: 'System One' } }
+const style = { font: { family: 'System Fallback' } }
+const commons = { Color: { notifications: { fontFamily: 'Theme One' } } }
+const service = {}
+const current = () => {
+  service.notificationFontSetting = setting(shell, service, style, commons)
+  return resolve(shell, service, style, commons)
+}
+assert.equal(current(), 'Theme One')
+shell.shellConfig.notifications = { font: 'Custom Override' }
+assert.equal(current(), 'Custom Override')
+commons.Color.notifications.fontFamily = 'Theme Two'
+assert.equal(current(), 'Custom Override')
+shell.shellConfig.notifications.font = 'default'
+assert.equal(current(), 'Theme Two')
+shell.shellConfig.notifications.font = 'system'
+assert.equal(current(), 'System One')
+shell.bar.fontFamily = 'System Two'
+assert.equal(current(), 'System Two')
+shell.bar = null
+assert.equal(current(), 'System Fallback')
+shell.shellConfig.notifications.font = ''
+commons.Color.notifications.fontFamily = 'Liberation Sans'
+assert.equal(current(), 'Liberation Sans')
+JS
+pass "theme default, custom override and live system font precedence"

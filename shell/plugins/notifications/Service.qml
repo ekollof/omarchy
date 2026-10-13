@@ -7,6 +7,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Services.Notifications
 import qs.Commons
+import qs.Commons as Commons
 
 import "components"
 import "NotificationLogic.js" as NotificationLogic
@@ -52,8 +53,8 @@ Item {
   readonly property int barClearance: liveBarSize + Style.gapsOut
 
   // Text font for notification summary/body, from shell.json `notifications.font`
-  // (see `omarchy notification font`). "default" is the built-in proportional
-  // font, "system" follows the live system monospace family, and anything else
+  // (see `omarchy notification font`). "default" follows the theme font,
+  // "system" follows the live system monospace family, and anything else
   // is a custom installed family name. shellConfig is reactive, so edits apply
   // without a shell restart; "system" stays live through the bar binding.
   readonly property string notificationFontSetting: {
@@ -65,7 +66,7 @@ Item {
     if (service.notificationFontSetting === "system")
       return (shell && shell.bar && shell.bar.fontFamily) || Style.font.family
     if (service.notificationFontSetting === "default")
-      return "Liberation Sans"
+      return Commons.Color.notifications.fontFamily
     return service.notificationFontSetting
   }
 

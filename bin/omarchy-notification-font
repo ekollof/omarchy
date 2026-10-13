@@ -15,7 +15,7 @@ usage() {
 Usage: omarchy notification font [show | default | system | set <font-name> | list]
 
   show                Show the current notification font mode
-  default             Use the built-in notification font ($DEFAULT_FONT)
+  default             Follow the theme font ($DEFAULT_FONT fallback)
   system              Follow the system monospace font (omarchy font set)
   set <font-name>     Use a specific installed font family
   list                List available font families
@@ -34,7 +34,7 @@ current_mode() {
 resolved_family() {
   local mode="$1" raw line
   case "$mode" in
-    default) printf '%s\n' "$DEFAULT_FONT" ;;
+    default) printf 'theme default (%s fallback)\n' "$DEFAULT_FONT" ;;
     system)
       # No pipeline: under `pipefail`, `head -n1` exits before fc-match
       # finishes writing, and the SIGPIPE failure would poison the status.
@@ -56,7 +56,7 @@ cmd_show() {
 cmd_default() {
   (( $# == 0 )) || fail "default takes no arguments"
   commit "$NORMALIZE | .notifications.font = \"default\""
-  echo "Notification font set to default ($DEFAULT_FONT)"
+  echo "Notification font follows the theme ($DEFAULT_FONT fallback)"
 }
 
 cmd_system() {
