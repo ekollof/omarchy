@@ -68,7 +68,11 @@ ShellRoot {
   function checkIcon(icon, name) {
     var sideBearing = (icon.implicitWidth - icon.glyphPaintedWidth) / 2
     var expectedBearing = (Style.bar.iconSlot - Style.bar.iconSize) / 2
-    if (Math.abs(sideBearing - expectedBearing) > 0.05) {
+    if (icon.bar.vertical && icon.implicitWidth !== Style.bar.sizeVertical) {
+      fail(name + " vertical width is " + icon.implicitWidth)
+      return false
+    }
+    if (!icon.bar.vertical && Math.abs(sideBearing - expectedBearing) > 0.05) {
       fail(name + " side bearing is " + sideBearing + " instead of " + expectedBearing)
       return false
     }
@@ -234,6 +238,29 @@ ShellRoot {
   function runGeometryTests() {
     if (testsStarted) return
     testsStarted = true
+    Style.applyShellValues({ "bar.icon-font": "16" })
+    Qt.callLater(function() {
+      if (Style.bar.iconFont !== 16 || Style.font.body !== 12) {
+        fail("icon font override does not preserve text size")
+        return
+      }
+      if (!checkIcon(bluetooth, "horizontal icon override")) return
+      if (!checkIcon(verticalIcon, "vertical icon override")) return
+      Style.applyShellValues({ "bar.icon-font": "16", "font.base-size": "18" })
+      Qt.callLater(function() {
+        if (Style.bar.iconFont !== 24) {
+          fail("icon font override does not scale with text size")
+          return
+        }
+        if (!checkIcon(bluetooth, "horizontal scaled icon override")) return
+        if (!checkIcon(verticalIcon, "vertical scaled icon override")) return
+        Style.applyShellValues({})
+        Qt.callLater(runDefaultGeometryTests)
+      })
+    })
+  }
+
+  function runDefaultGeometryTests() {
     if (!checkGeometry()) return
     var labelBaseline = plainLabel.baselineY
     root.customWidth = 23
