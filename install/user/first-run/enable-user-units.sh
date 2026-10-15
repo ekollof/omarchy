@@ -25,8 +25,7 @@ for unit in \
   omarchy-sleep-lock.service \
   omarchy-migrate-notify.service \
   omarchy-fcitx5.service \
-  omarchy-crash-watch.service \
-  omarchy-gpd-pocket-4-rotate.service; do
+  omarchy-crash-watch.service; do
   systemctl --user enable --now "$unit" || failed=1
 done
 
