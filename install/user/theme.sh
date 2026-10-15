@@ -11,6 +11,7 @@ if [[ ! -s $HOME/.local/state/omarchy/current/theme.name ]]; then
   fi
 fi
 omarchy-theme-set-pi --activate
+omarchy-theme-set-fcitx5 --activate
 omarchy-theme-set-opencode --activate
 
 mkdir -p ~/.config/btop/themes
