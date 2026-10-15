@@ -11,4 +11,8 @@ if [[ ! -f $theme_dir/opencode.json && -s $theme_name_path ]]; then
     omarchy-theme-refresh
   fi
 fi
+if [[ ! -f $theme_dir/opencode.json ]]; then
+  echo "OpenCode theme activation skipped: the active palette is unavailable; select an installed theme to enable syncing."
+  exit 0
+fi
 omarchy-theme-set-opencode --activate
