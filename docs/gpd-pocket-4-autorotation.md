@@ -10,7 +10,9 @@ systemctl --user daemon-reload
 systemctl --user enable --now omarchy-gpd-pocket-4-rotate.service
 ```
 
-The daemon watches the system-bus accelerometer and applies matching transforms to the internal output and digitizer. It requires Python's Gio bindings, supplied by Omarchy's python-gobject dependency. The unit checks the GPD detector and Wayland environment, so it stays inert on other hardware. Sensor startup failures retry through systemd; a periodic reconciliation restores the last orientation after a compositor configuration reload.
+The daemon watches the system-bus accelerometer and applies matching transforms to the internal output and digitizer. It requires Python's Gio bindings, supplied by Omarchy's python-gobject dependency. The unit checks the GPD detector and Wayland environment, so it stays inert on other hardware. Sensor startup failures retry through systemd. Losing or replacing the sensor's D-Bus owner exits the daemon with failure so systemd can restart it and claim the replacement sensor. A periodic reconciliation restores the last orientation after a compositor configuration reload.
+
+The imported HYPRLAND_INSTANCE_SIGNATURE selects the session normally. If it is absent, fallback probes instance directories newest-first by modification time and only retains an instance that responds with a nonempty monitor list. No reachable instance causes a failed startup and systemd retry rather than rotation against an unverified directory.
 
 The mapping normal=0, left-up=1, bottom-up=2, right-up=3 was calibrated on a GPD Pocket 4 whose laptop pose reports right-up. An integer offset in `~/.config/omarchy/gpd-pocket-4-orientation` shifts that mapping modulo four; restart the service after changing it. Other sensor calibrations still require real-device verification.
 
