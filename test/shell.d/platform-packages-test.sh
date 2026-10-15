@@ -25,6 +25,7 @@ for platform in aarch64-apple aarch64 x86; do
     fail "$platform: the detected platform selects its own list"
   printf '%s\n' "$defaults" >"$work/$platform.packages"
 
+  grep -Fxq superwhisper-bin "$work/$platform.packages" || fail "$platform: Superwhisper is a default package"
   [[ -z $(sort "$work/$platform.packages" | uniq -d) ]] || fail "$platform: each package is listed once"
   # aarch64 platforms leave out the base packages only x86_64 builds.
   expected_base=$base
@@ -74,8 +75,29 @@ for platform in aarch64-apple aarch64 x86; do
 done
 pass "a platform list joins only its own platform's set"
 
+# Snapdragon, the N1x and the GB10 add their own lists after the aarch64
+# additions; no other platform gets them.
+names_of() { sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$ROOT/install/omarchy-$1.packages"; }
+for family in aarch64-qualcomm aarch64-n1x aarch64-gb10; do
+  defaults=$(OMARCHY_PATH="$ROOT" omarchy-pkg-defaults "$family")
+  [[ $(tail -n "$(names_of "$family" | wc -l)" <<<"$defaults") == "$(names_of "$family")" ]] ||
+    fail "$family's own list comes last" "$defaults"
+  while IFS= read -r package; do
+    grep -Fxq "$package" <<<"$defaults" || fail "$family keeps the aarch64 addition $package"
+  done < <(names_of aarch64)
+  for other in aarch64 aarch64-apple x86; do
+    while IFS= read -r package; do
+      ! grep -Fxq "$package" <<<"$(OMARCHY_PATH="$ROOT" omarchy-pkg-defaults "$other")" ||
+        fail "$other leaves out $family's $package"
+    done < <(names_of "$family")
+  done
+done
+grep -Fxq linux-omarchy <<<"$(names_of aarch64-n1x)" || fail "the N1x list names its kernel"
+! grep -Eq 'proart|asus|xps' <<<"$(names_of aarch64-n1x)" || fail "a single N1x model's packages stay with its hardware setup"
+pass "Snapdragon, the N1x and the GB10 add their own lists, and only they do"
+
 # Image builders written before the platform names settled pass the old names.
-for legacy in apple-silicon:aarch64-apple generic-aarch64:aarch64 generic:x86; do
+for legacy in apple-silicon:aarch64-apple generic-aarch64:aarch64 generic:x86 qualcomm:aarch64-qualcomm; do
   [[ $(omarchy-pkg-defaults "${legacy%%:*}") == "$(omarchy-pkg-defaults "${legacy#*:}")" ]] ||
     fail "the old name ${legacy%%:*} composes the ${legacy#*:} set"
 done
@@ -93,7 +115,6 @@ for platform in aarch64-apple aarch64 x86; do
     fi
   done <"$ROOT/install/omarchy-x86_64-only.packages"
 done
-grep -Fxq superwhisper-bin "$ROOT/install/omarchy-x86_64-only.packages" || fail "superwhisper-bin is listed as x86_64-only"
 pass "base packages only x86_64 builds stay out of every aarch64 set"
 
 ! omarchy-pkg-defaults riscv 2>/dev/null || fail "an unknown platform is refused"
