@@ -66,9 +66,10 @@ ShellRoot {
   }
 
   function checkIcon(icon, name) {
-    var expectedWidth = icon.bar.vertical ? Style.bar.sizeVertical : Style.bar.iconSlot
-    if (icon.implicitWidth !== expectedWidth) {
-      fail(name + " slot width is " + icon.implicitWidth)
+    var sideBearing = (icon.implicitWidth - icon.glyphPaintedWidth) / 2
+    var expectedBearing = (Style.bar.iconSlot - Style.bar.iconSize) / 2
+    if (icon.bar.vertical ? icon.implicitWidth !== Style.bar.sizeVertical : Math.abs(sideBearing - expectedBearing) > 0.05) {
+      fail(name + " slot width or horizontal side bearing is incorrect")
       return false
     }
     if (icon.opticalSize !== Style.bar.iconCanvas) {
@@ -90,6 +91,18 @@ ShellRoot {
     if (!checkIcon(power, "power")) return false
     if (!checkIcon(elsewhen, "elsewhen")) return false
     if (!checkIcon(menu, "menu")) return false
+    var monitorBatteryGap = (monitor.implicitWidth - monitor.glyphPaintedWidth
+      + power.implicitWidth - power.glyphPaintedWidth) / 2
+    var audioMonitorGap = (audio.implicitWidth - audio.glyphPaintedWidth
+      + monitor.implicitWidth - monitor.glyphPaintedWidth) / 2
+    if (Math.abs(monitorBatteryGap - audioMonitorGap) > 0.05) {
+      fail("battery and monitor have a larger visible gap than adjacent icons")
+      return false
+    }
+    if (labelledPower.implicitWidth !== Style.bar.iconSlot * 2) {
+      fail("battery percentage loses its double-width slot")
+      return false
+    }
     var sourceRatio = sourceMetrics.tightBoundingRect.width / sourceMetrics.tightBoundingRect.height
     if (Math.abs(bluetooth.glyphPaintedWidth / bluetooth.glyphPaintedHeight - sourceRatio) > 0.01) {
       fail("the glyph's aspect ratio changes")
