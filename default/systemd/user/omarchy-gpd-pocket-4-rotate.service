@@ -1,7 +1,7 @@
 [Unit]
 Description=Automatic screen rotation (GPD Pocket 4 accelerometer via iio-sensor-proxy)
 # Only the internal panel of a GPD Pocket 4 needs this; other hardware stays
-# inert even though the unit ships (and is enabled) everywhere.
+# inert if the opt-in unit is enabled on unrelated hardware.
 ConditionPathIsDirectory=/sys/bus/iio/devices
 ConditionEnvironment=WAYLAND_DISPLAY
 PartOf=graphical-session.target
