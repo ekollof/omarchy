@@ -88,7 +88,9 @@ local function omarchy_startup_cursor_load()
     if saved[key] ~= "true" and saved[key] ~= "false" then return nil end
   end
   if not saved.xcursor or saved.xcursor == "" or saved.xcursor == "omarchy-startup" then return nil end
-  if not saved.path or saved.path == "" then return nil end
+  -- An explicitly empty XCURSOR_PATH is valid and uses the loader's defaults.
+  -- Reject a missing field, not a captured empty value.
+  if not saved.path then return nil end
   local size = tonumber(saved.size)
   if not size or size <= 0 or size == math.huge then return nil end
   return {

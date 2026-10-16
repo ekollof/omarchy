@@ -186,6 +186,26 @@ events["config.reloaded"]()
 assert(not omarchy_startup_cursor_pending and not config.invisible, "installing the fix in a running compositor must leave its cursor alone")
 assert(not io.open(state_file, "r"), "a healthy reload must drop a stale capture")
 
+-- An exported empty path is valid. Losing this snapshot would recapture
+-- invisible=true from the temporary startup config and never show the pointer.
+env.XCURSOR_PATH, env.XCURSOR_THEME = "", "empty-path-theme"
+env.OMARCHY_STARTUP_CURSOR = "previous-instance:done"
+config.invisible, config.enable_hyprcursor, config.sync_gsettings_theme = false, true, true
+omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
+monitors = {}
+events["config.reloaded"]()
+assert(config.invisible, "startup must initially hide the pointer")
+omarchy_startup_cursor_pending, omarchy_startup_cursor = nil, nil
+monitors = { {} }
+events["config.reloaded"]()
+assert(omarchy_startup_cursor.path == "" and not omarchy_startup_cursor.config.invisible,
+  "empty paths must preserve the original visible cursor settings across reload")
+omarchy_startup_cursor_restore(true)
+reveal()
+assert(not config.invisible and config.enable_hyprcursor and config.sync_gsettings_theme,
+  "the resumed empty-path reveal must restore visibility and original settings")
+assert(not io.open(state_file, "r"), "empty-path recovery must clean up its snapshot")
+
 -- Snapshot content is data, never a Lua program, even in a pending session.
 local malicious = assert(io.open(state_file, "w"))
 malicious:write("_G.snapshot_executed = true; return { xcursor = 'injected', path = '/injected', size = 24 }\n")
