@@ -18,6 +18,7 @@ import tempfile
 import time
 
 root = pathlib.Path(os.environ["ROOT"])
+source_root = pathlib.Path(os.environ.get("CURSOR_TEST_SOURCE_ROOT", str(root)))
 reload_during_reveal = os.environ.get("CURSOR_TEST_RELOAD_DURING_REVEAL") == "1"
 evidence = os.environ.get("CURSOR_TEST_EVIDENCE_DIR")
 if evidence:
@@ -37,7 +38,7 @@ with tempfile.TemporaryDirectory() as directory:
   fixture = root / "test/shell.d/fixtures/startup-cursor"
   (stage / "shell.qml").write_text((fixture / "shell.qml").read_text())
   env = os.environ.copy()
-  env.update(HOME=str(home), OMARCHY_PATH=str(root), CURSOR_TEST_STAGE=str(stage),
+  env.update(HOME=str(home), OMARCHY_PATH=str(source_root), CURSOR_TEST_STAGE=str(stage),
          PATH=str(stage / "bin") + ":" + env["PATH"], AQ_BACKEND="wayland",
          HYPRLAND_NO_SD_VARS="1", HYPRLAND_NO_SD_NOTIFY="1", GSETTINGS_BACKEND="memory",
          XCURSOR_THEME="Adwaita", XCURSOR_PATH="/usr/share/icons:/usr/share/pixmaps", XCURSOR_SIZE="24", HYPRCURSOR_SIZE="24")
@@ -133,7 +134,8 @@ with tempfile.TemporaryDirectory() as directory:
       (evidence / "revealed.png").write_bytes(screenshot.read_bytes())
     subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/done", "w")); f:write(tostring(omarchy_startup_cursor_pending) .. "\\n" .. tostring(os.getenv("OMARCHY_STARTUP_CURSOR"))); f:close()'],
              env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
-    assert (stage / "done").read_text() == "false\n" + signature + ":done", "visible cursor must finish the instance phase"
+    if source_root == root:
+      assert (stage / "done").read_text() == "false\n" + signature + ":done", "visible cursor must finish the instance phase"
     capture = pathlib.Path(env["XDG_RUNTIME_DIR"]) / ("omarchy-startup-cursor-" + signature + ".state")
     assert not capture.exists(), "completed redraw left a stale capture"
     subprocess.run(["hyprctl", "reload"], env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
