@@ -114,22 +114,26 @@ with tempfile.TemporaryDirectory() as directory:
     # bring the real pointer into the nested window first, then place
     # the nested cursor clear of the edges (the parent warp lands it
     # wherever the window's scaling puts it).
-    clients = subprocess.check_output(["hyprctl", "clients", "-j"], env=parent_env, text=True, timeout=5)
     import json
-    for client in json.loads(clients):
-      if client.get("pid") == compositor.pid:
-        x = client["at"][0] + client["size"][0] // 2
-        y = client["at"][1] + client["size"][1] // 2
-        subprocess.run(["hyprctl", "eval", f"hl.dispatch(hl.dsp.cursor.move({{ x = {x}, y = {y} }}))"], env=parent_env, check=True, capture_output=True, timeout=5)
-        break
-    subprocess.run(["hyprctl", "eval", "hl.dispatch(hl.dsp.cursor.move({ x = 100, y = 100 }))"], env=env, check=True, capture_output=True, timeout=5)
+    def place_pointer():
+      clients = subprocess.check_output(["hyprctl", "clients", "-j"], env=parent_env, text=True, timeout=5)
+      for client in json.loads(clients):
+        if client.get("pid") == compositor.pid:
+          x = client["at"][0] + client["size"][0] // 2
+          y = client["at"][1] + client["size"][1] // 2
+          subprocess.run(["hyprctl", "eval", f"hl.dispatch(hl.dsp.cursor.move({{ x = {x}, y = {y} }}))"], env=parent_env, check=True, capture_output=True, timeout=5)
+          break
+      subprocess.run(["hyprctl", "eval", "hl.dispatch(hl.dsp.cursor.move({ x = 100, y = 100 }))"], env=env, check=True, capture_output=True, timeout=5)
+    place_pointer()
     # Cursor visibility is polled by the compositor independently of the fade.
     # Losing the redraw timer must recover through the production 15s fallback.
     deadline = time.monotonic() + (20 if reload_during_reveal else 5)
     while True:
       if cursor_pixels() > 20:
         break
-      assert time.monotonic() < deadline, "the normal cursor did not return with the desktop"
+      if time.monotonic() >= deadline:
+        subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/failure-state", "w")); f:write("pending=" .. tostring(omarchy_startup_cursor_pending) .. " invisible=" .. tostring(hl.get_config("cursor.invisible")) .. " phase=" .. tostring(os.getenv("OMARCHY_STARTUP_CURSOR")) .. " theme=" .. tostring(os.getenv("XCURSOR_THEME"))); f:close()'], env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
+        raise AssertionError("the normal cursor did not return with the desktop: " + (stage / "failure-state").read_text())
     if evidence:
       (evidence / "revealed.png").write_bytes(screenshot.read_bytes())
     subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/done", "w")); f:write(tostring(omarchy_startup_cursor_pending) .. "\\n" .. tostring(os.getenv("OMARCHY_STARTUP_CURSOR"))); f:close()'],
@@ -142,10 +146,15 @@ with tempfile.TemporaryDirectory() as directory:
     subprocess.run(["hyprctl", "eval", 'local f = assert(io.open(os.getenv("CURSOR_TEST_STAGE") .. "/healthy", "w")); f:write(tostring(omarchy_startup_cursor_pending) .. "\\n" .. tostring(hl.get_config("cursor.invisible"))); f:close()'],
              env=env, check=True, timeout=5, stdout=subprocess.DEVNULL)
     assert (stage / "healthy").read_text() == "false\nfalse", "a healthy reload restarted cursor hiding"
+    # Re-enter the nested surface after reload; its parent-side placement or
+    # pointer focus can change independently of the cursor being tested.
+    place_pointer()
     # Wait for a rendered frame after reload rather than sampling its transition.
     deadline = time.monotonic() + 5
     while cursor_pixels() <= 20:
-      assert time.monotonic() < deadline, "a healthy reload left the restored cursor invisible"
+      if time.monotonic() >= deadline:
+        position = subprocess.check_output(["hyprctl", "cursorpos"], env=env, text=True, timeout=5).strip()
+        raise AssertionError("a healthy reload left the restored cursor invisible; cursorpos=" + position + "; state=" + (stage / "healthy").read_text())
     if evidence:
       # Keep the captured frames and their actual intervals as a short recording.
       timeline = evidence / "frames.ffconcat"
