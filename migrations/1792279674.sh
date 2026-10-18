@@ -18,16 +18,11 @@ app_dir="$HOME/.local/share/applications"
 override="$app_dir/com.mitchellh.ghostty.desktop"
 mkdir -p "$app_dir"
 
-if [[ -f $override ]]; then
-  # Preserve any user customizations; repair only the activation lookup.
-  if grep -q "^DBusActivatable=" "$override"; then
-    sed -i "s/^DBusActivatable=.*/DBusActivatable=false/" "$override"
-  else
-    printf "%s\n" "DBusActivatable=false" >>"$override"
-  fi
-else
+if [[ ! -e $override ]]; then
   cp "$system_desktop" "$override"
-  sed -i "s/^DBusActivatable=true/DBusActivatable=false/" "$override"
 fi
+
+# Edit the main group even when desktop actions follow it; preserve custom keys.
+desktop-file-edit --set-key=DBusActivatable --set-value=false "$override"
 
 update-desktop-database "$app_dir"
