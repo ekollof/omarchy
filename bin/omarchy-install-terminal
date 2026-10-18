@@ -34,6 +34,15 @@ if omarchy-pkg-add $package; then
   elif [[ $package == "foot" ]]; then
     mkdir -p ~/.local/share/applications
     cp "$OMARCHY_PATH/applications/$desktop_id" ~/.local/share/applications/
+  elif [[ $package == "ghostty" ]]; then
+    # The shipped desktop file uses DBusActivatable=true, but its user service
+    # fails to start, so menu launches silently do nothing until fixed upstream.
+    # See https://github.com/omacom/omarchy/issues/15779
+    if grep -q "^DBusActivatable=true" /usr/share/applications/com.mitchellh.ghostty.desktop 2>/dev/null && [[ ! -f ~/.local/share/applications/com.mitchellh.ghostty.desktop ]]; then
+      mkdir -p ~/.local/share/applications
+      sed "s/^DBusActivatable=true/DBusActivatable=false/" /usr/share/applications/com.mitchellh.ghostty.desktop >~/.local/share/applications/com.mitchellh.ghostty.desktop
+      update-desktop-database ~/.local/share/applications
+    fi
   fi
 
   # Copy default config for optional terminals when missing
