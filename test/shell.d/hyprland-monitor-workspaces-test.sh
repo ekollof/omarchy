@@ -672,5 +672,9 @@ hl.dispatch(m.pull(2, "DP-1"))
 check(world.windows["0xb"].workspace == 2 and on(2) == "DP-1", "a full block retains the original id as a guest")
 check(shows("DP-1") == 2 and shows("eDP-1") == 1 and world.swaps == 0, "a guest pull focuses the target and repairs its source")
 for id = 11, 20 do check(world.windows["local" .. id].workspace == id, "a full block must not lose a local workspace") end
+world.windows["local12"] = nil
+hl.dispatch(m.pull(2, "DP-1"))
+check(world.windows["0xb"].workspace == 12 and shows("DP-1") == 12,
+  "a guest already here joins the local block once its slot is free")
 ' || fail "pull keeps a guest only when the target block is full"
 pass "pull keeps a guest only when the target block is full"

@@ -505,10 +505,12 @@ function M.move_to_monitor(direction)
 
     local id = workspace.id
     local from = hl.get_active_monitor()
-    hl.dispatch(hl.dsp.workspace.move({ monitor = target.name }))
+    if not from or from.name ~= target.name then
+      hl.dispatch(hl.dsp.workspace.move({ monitor = target.name }))
+    end
 
     local moved = hl.get_workspace(id)
-    if not moved or not moved.monitor or (from and moved.monitor.name == from.name) then
+    if not moved or not moved.monitor or moved.monitor.name ~= target.name then
       return
     end
 
