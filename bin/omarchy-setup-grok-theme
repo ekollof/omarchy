@@ -19,7 +19,8 @@ import tomllib
 
 config = Path.home() / ".grok/config.toml"
 if config.is_symlink():
-    raise SystemExit("Grok config is a symlink; leaving it unchanged")
+    print("Grok config is a symlink; leaving it unchanged")
+    raise SystemExit(0)
 original = config.read_text() if config.exists() else ""
 data = tomllib.loads(original)
 expected = copy.deepcopy(data)

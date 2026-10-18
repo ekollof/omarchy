@@ -53,3 +53,15 @@ if bash "$helper" >/dev/null 2>&1; then
 fi
 cmp "$test_dir/before" "$HOME/.grok/config.toml"
 pass "dotted explicit choices and invalid TOML are preserved"
+
+rm "$HOME/.grok/config.toml"
+printf '[ui]\ntheme = "custom"\n' >"$test_dir/dotfiles.toml"
+cp "$test_dir/dotfiles.toml" "$test_dir/dotfiles.before"
+ln -s "$test_dir/dotfiles.toml" "$HOME/.grok/config.toml"
+bash "$helper"
+[[ -L $HOME/.grok/config.toml ]]
+cmp "$test_dir/dotfiles.before" "$test_dir/dotfiles.toml"
+rm "$test_dir/dotfiles.toml"
+bash "$helper"
+[[ -L $HOME/.grok/config.toml && ! -e $HOME/.grok/config.toml ]]
+pass "existing and dangling config symlinks skip successfully without changing user files"
