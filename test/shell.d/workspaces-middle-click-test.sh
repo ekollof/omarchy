@@ -16,12 +16,12 @@ const widget = {
   focusWorkspace: id => calls.push(['focus', id]),
   cycleLayout: () => calls.push(['cycle']),
 }
-const press = new Function('button', 'focused', 'root', 'Qt', 'modelData', handler[1])
+const press = new Function('button', 'shown', 'root', 'Qt', 'modelData', handler[1])
 press(4, true, widget, {MiddleButton: 4}, 3)
 press(1, true, widget, {MiddleButton: 4}, 3)
 press(1, false, widget, {MiddleButton: 4}, 3)
 assert(JSON.stringify(calls) === JSON.stringify([['pull', 3], ['cycle'], ['focus', 3]]),
-  'middle-click pulls even a focused workspace; left-click cycles the focused layout or focuses another workspace')
+  'middle-click pulls even a shown workspace; left-click cycles the shown layout or focuses another workspace')
 
 const pullFunction = qml.match(/function focusWorkspaceOnClickedMonitor\(id\) \{([\s\S]*?)\n  \}/)
 assert(pullFunction, 'the production pull function is available to exercise')
