@@ -60,6 +60,7 @@ assertDeepEqual(
     action: 'omarchy-theme-set',
     provider: '',
     aliases: ['theme'],
+    searchTerms: [],
     when: '',
     checked: '',
     disabled: ''
@@ -298,22 +299,36 @@ assert(!defaultById['install.ai.crush'], 'menu removes Crush from Install > AI')
 // Software you already have keeps its place in Install, dimmed rather than
 // dropped, so the list reads as a catalog of what Omarchy can install.
 // Chromium Account is the sole Install row with anything left to hide for. The
-// Windows VM, whose guest can't run elsewhere, and the installers whose vendors
-// ship Linux builds for x86_64 alone hide only off x86_64, so any other `when:`
+// Windows VM, whose guest can't run elsewhere, and the installers that need
+// x86_64 binaries (vendor builds for x86_64 alone, Windows games under Wine)
+// hide only off x86_64. Dropbox's x86_64 client runs under box64 on ARM, which
+// needs 4K pages, so it hides only where pages are larger. Spotify installs its
+// web player where its client can't run, so it never hides. Any other `when:`
 // here is a row that went back to vanishing once installed.
 const windowsGuard = 'omarchy-hw-x86'
-const x86OnlyInstalls = ['install.windows', 'install.browser.edge', 'install.service.dropbox', 'install.service.spotify', 'install.gaming.minecraft', 'install.gaming.heroic']
+const x86OnlyInstalls = ['install.windows', 'install.browser.edge', 'install.gaming.minecraft', 'install.gaming.heroic', 'install.gaming.geforce-now', 'install.gaming.battlenet', 'install.gaming.lutris']
+const fourKPageGuard = '[[ $(getconf PAGESIZE) == 4096 ]]'
 assertDeepEqual(
   defaultItems
     .filter(item => item.id.startsWith('install.') && item.action && item.when)
     .map(item => item.id)
     .sort(),
-  [...x86OnlyInstalls, 'install.service.chromium-account'].sort(),
+  [...x86OnlyInstalls, 'install.service.dropbox', 'install.service.chromium-account'].sort(),
   'menu never hides an Install row because the software is already there'
 )
 assert(
   x86OnlyInstalls.every(id => defaultById[id].when === windowsGuard),
   'menu hides the Windows VM and the x86_64-only installers only off x86_64'
+)
+assertEqual(
+  defaultById['install.service.dropbox'].when,
+  fourKPageGuard,
+  'menu offers Dropbox wherever box64 can run it, on x86_64 and on ARM with 4K pages'
+)
+assert(
+  !defaultById['install.service.spotify'].when
+    && defaultById['install.service.spotify'].disabled.includes('applications/Spotify.desktop'),
+  'menu offers Spotify on every platform and dims it once its client or web player is installed'
 )
 assert(
   ['install.browser.zen', 'install.editor.vscode', 'install.gaming.steam', 'install.development.rust', 'install.windows'].every(
@@ -583,9 +598,10 @@ assert(
   'plugin enable reports a bar as replacing the one in use, whether enabled or freshly added'
 )
 assert(
-  /\.barWidget\.defaultSection \/\/ "center"/.test(pluginAdd)
+  /\.barWidget\.defaultSection \/\/ "centerEnd" \| if \. == "center" then "centerEnd" end/.test(pluginAdd)
+    && /printf '%s\\n' left centerBegin center centerEnd tray right \|/.test(pluginAdd)
     && /gum choose[\s\S]*?--selected "\$default_section"/.test(pluginAdd),
-  'interactive plugin add selects the manifest placement or center fallback by default'
+  'interactive plugin add offers every bar section and selects the manifest placement or centerEnd fallback by default'
 )
 assert(
   /"omarchy-plugin-\$1" "\$id"/.test(pluginPicker),
@@ -698,8 +714,19 @@ assert(
   'menu route changes only accept an initial pointer sample for mouse activation'
 )
 assert(
-  /\(event\.key === Qt\.Key_Backspace \|\| event\.key === Qt\.Key_Left\) && !root\.filterText[\s\S]*root\.goBack\(\)/.test(menuQml),
-  'menu Left key follows empty-filter Backspace navigation'
+  /\(event\.key === Qt\.Key_Backspace \|\| Util\.readingKey\(event\) === Qt\.Key_Left\) && !root\.filterText[\s\S]*root\.goBack\(\)/.test(menuQml),
+  'menu Left key (Right in a right-to-left language) follows empty-filter Backspace navigation'
+)
+// Input methods commit text only to a text-input item, so the search line must be one.
+const filterInputBlock = (menuQml.match(/FilterInput \{[\s\S]*?\n          \}/) || [''])[0]
+assert(
+  /keyHandler: keyCatcher/.test(filterInputBlock)
+    && /readOnly: root\.deleteConfirmOpen/.test(filterInputBlock)
+    && /onTextChanged: if \(text !== root\.filterText\) root\.setFilter\(text\)/.test(filterInputBlock)
+    && /onFilterTextChanged: if \(filterInput\.text !== filterText\) filterInput\.text = filterText/.test(menuQml)
+    && !/event\.text/.test(menuQml.match(/id: keyCatcher[\s\S]*?ConfirmDialog \{/)[0])
+    && (menuQml.match(/keyCatcher\.forceActiveFocus/g) || []).length === 0,
+  'menu search line takes input-method text, refuses it behind the delete confirmation, and stays in step with the filter'
 )
 assert(
   /PointerMoveGate\s*\{[\s\S]*id: pointerGate[\s\S]*referenceItem: card[\s\S]*\}/.test(menuQml),
@@ -849,7 +876,7 @@ assert(
 // Both menu files load separately at startup; evaluating after the first
 // alone ran the whole guard batch twice.
 assert(
-  /function rebuildItemsFromSources\(\)[\s\S]*?if \(root\.defaultMenuSettled && root\.userMenuSettled\) root\.evaluateGuards\(\)/.test(menuQml)
+  /function rebuildItemsFromSources\(skipGuards\)[\s\S]*?if \(!skipGuards && root\.defaultMenuSettled && root\.userMenuSettled\) root\.evaluateGuards\(\)/.test(menuQml)
     && /onLoaded: \{ root\.defaultMenuItems = [^}]*root\.defaultMenuSettled = true; root\.rebuildItemsFromSources\(\) \}/.test(menuQml)
     && /onLoadFailed: \{ root\.defaultMenuSettled = true; if \(root\.userMenuSettled\) root\.evaluateGuards\(\) \}/.test(menuQml)
     && /onLoaded: \{ root\.userMenuItems = [^}]*root\.userMenuSettled = true; root\.rebuildItemsFromSources\(\) \}/.test(menuQml)
