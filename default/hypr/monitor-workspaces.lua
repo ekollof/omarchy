@@ -447,6 +447,30 @@ function M.focus(slot, monitor_name)
   end, "o.workspaces.focus(" .. slot .. (monitor_name and ", " .. literal(monitor_name) or "") .. ")")
 end
 
+-- Pull an id onto a monitor using the same adoption/source repair as a keyboard
+-- workspace move. Missing local slots may be created, stale foreign ids may not.
+function M.pull(id, monitor_name)
+  return action(function()
+    local monitor = target_monitor(monitor_name)
+    if not monitor or type(id) ~= "number" or id < 1 or id % 1 ~= 0 then
+      return
+    end
+    local workspace = hl.get_workspace(id)
+    if not workspace then
+      local slot = (id - 1) % SLOTS + 1
+      if id == M.workspace_id(monitor, slot) then
+        hl.dispatch(M.focus(slot, monitor.name))
+      end
+      return
+    end
+    if not regular(workspace) then
+      return
+    end
+    hl.dispatch(hl.dsp.focus({ workspace = tostring(id) }))
+    hl.dispatch(M.move_to_monitor(monitor.name))
+  end, "o.workspaces.pull(" .. tostring(id) .. (monitor_name and ", " .. literal(monitor_name) or "") .. ")")
+end
+
 -- Move the active window to a slot on the focused monitor, following it unless
 -- `follow` is false.
 function M.move_window(slot, follow)

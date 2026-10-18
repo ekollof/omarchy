@@ -32,14 +32,14 @@ const pull = new Function('id', 'root', 'Util', pullFunction[1])
 const util = {shellQuote: value => "'" + value.replace(/'/g, "'\\''") + "'"}
 pull(3, pullWidget, util)
 assert(commands.length === 1 && commands[0] ===
-  `hyprctl dispatch 'hl.dsp.focus({ monitor = "DP-2" })' && hyprctl dispatch 'hl.dsp.focus({ workspace = "3", on_current_monitor = true })'`,
-  'pull focuses the clicked monitor before dispatching the workspace, conditional on success')
+  `hyprctl dispatch 'o.workspaces.pull(3, "DP-2")'`,
+  'pull delegates adoption and source repair to the per-monitor compositor helper')
 commands.length = 0
 pullWidget.clickedMonitorName = () => ''
 pull(3, pullWidget, util)
 assert(commands.length === 1 && commands[0] ===
-  `hyprctl dispatch 'hl.dsp.focus({ workspace = "3", on_current_monitor = true })'`,
-  'without a resolved monitor the pull dispatch targets the current monitor directly')
+  `hyprctl dispatch 'o.workspaces.pull(3)'`,
+  'without a resolved monitor the compositor helper uses the current monitor')
 commands.length = 0
 pullWidget.bar = null
 pull(3, pullWidget, util)
@@ -59,8 +59,8 @@ assert(
   'left-click keeps Hyprland default workspace focus'
 )
 assert(
-  /on_current_monitor = true/.test(qml),
-  'the pull dispatch asks Hyprland to show the tag on the current monitor'
+  /o\.workspaces\.pull\(/.test(qml) && !/on_current_monitor = true/.test(qml),
+  'pull uses per-monitor adoption instead of raw cross-monitor swapping'
 )
 assert(
   /Hyprland\.monitorFor/.test(qml),

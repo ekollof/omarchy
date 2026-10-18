@@ -618,3 +618,59 @@ hl.dispatch(m.move_to_monitor("u"))
 check(world.windows["0xa"].workspace == 11 and world.focused == "DP-1", "a move toward no monitor did something")
 ' || fail "a window moves to the monitor in a direction, and nowhere when there is none"
 pass "a window moves to the monitor in a direction, and nowhere when there is none"
+
+run_lua pull '
+plug("eDP-1", 0, "Panel", 1)
+plug("DP-1", 1, "LG", 11)
+world.focused = "eDP-1"
+local m = load_module()
+world.handlers["hyprland.start"]()
+window("0xa", 1)
+window("0xb", 2)
+world.focused = "DP-1"
+window("0xc", 12)
+window("0xd", 11)
+world.focused = "eDP-1"
+hl.dispatch(m.pull(2, "DP-1"))
+check(world.windows["0xb"].workspace == 13 and on(13) == "DP-1", "a collision uses the first free local slot")
+check(world.windows["0xc"].workspace == 12, "the existing local workspace is not overwritten")
+check(world.focused == "DP-1" and shows("DP-1") == 13, "the pulled workspace gets focus")
+check(shows("eDP-1") == 1 and world.swaps == 0, "the source returns home without a cross-monitor swap")
+hl.dispatch(m.pull(13, "DP-1"))
+check(world.windows["0xb"].workspace == 13, "pulling the shown local workspace is a no-op")
+check(o.bind_expressions[m.pull(13, "DP-1")] == "o.workspaces.pull(13, \"DP-1\")", "IPC can replay the action")
+' || fail "pull adopts a free local slot and repairs the source monitor"
+pass "pull adopts a free local slot and repairs the source monitor"
+
+run_lua pull_empty '
+plug("eDP-1", 0, "Panel", 1)
+plug("DP-1", 1, "LG", 11)
+local m = load_module()
+world.handlers["hyprland.start"]()
+world.focused = "eDP-1"
+hl.dispatch(m.pull(14, "DP-1"))
+check(on(14) == "DP-1" and shows("DP-1") == 14, "a local placeholder is created on the clicked monitor")
+hl.dispatch(m.pull(999, "DP-1"))
+hl.dispatch(m.pull(1, "missing"))
+hl.dispatch(m.pull(-1, "DP-1"))
+check(on(999) == nil and shows("DP-1") == 14, "invalid/stale destinations do not create foreign workspaces")
+' || fail "pull handles local placeholders and stale targets"
+pass "pull handles local placeholders and stale targets"
+
+run_lua pull_full '
+plug("eDP-1", 0, "Panel", 1)
+plug("DP-1", 1, "LG", 11)
+local m = load_module()
+world.handlers["hyprland.start"]()
+world.focused = "eDP-1"
+window("0xa", 1)
+window("0xb", 2)
+world.focused = "DP-1"
+for id = 11, 20 do window("local" .. id, id) end
+world.focused = "eDP-1"
+hl.dispatch(m.pull(2, "DP-1"))
+check(world.windows["0xb"].workspace == 2 and on(2) == "DP-1", "a full block retains the original id as a guest")
+check(shows("DP-1") == 2 and shows("eDP-1") == 1 and world.swaps == 0, "a guest pull focuses the target and repairs its source")
+for id = 11, 20 do check(world.windows["local" .. id].workspace == id, "a full block must not lose a local workspace") end
+' || fail "pull keeps a guest only when the target block is full"
+pass "pull keeps a guest only when the target block is full"
