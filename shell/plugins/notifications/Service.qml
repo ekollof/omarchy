@@ -28,6 +28,20 @@ Item {
   // Injected by omarchy-shell (the first-party service loader).
   property var shell: null
 
+  // "default" follows the theme; "system" and custom families are user overrides.
+  readonly property string notificationFontSetting: {
+    var cfg = shell && shell.shellConfig ? shell.shellConfig.notifications : null
+    var f = cfg ? cfg.font : null
+    return (typeof f === "string" && f.length > 0) ? f : "default"
+  }
+  readonly property string notificationTextFontFamily: {
+    if (service.notificationFontSetting === "system")
+      return (shell && shell.bar && shell.bar.fontFamily) || Style.font.family
+    if (service.notificationFontSetting === "default")
+      return Commons.Color.notifications.fontFamily
+    return service.notificationFontSetting
+  }
+
   // ------------------------------------------------------------- settings
   //
   // shell.json's `notifications` object; Settings.resolve fills every default.
@@ -1688,6 +1702,7 @@ Item {
                      || ({ y: 0, scale: 1, opacity: 0, z: 1, front: false, hidden: true })
               hovered: service.hoverKey === model.key
               actions: service.actionsOf(model.key, service.refsRevision)
+              textFontFamily: service.notificationTextFontFamily
               hoverX: service.hoverX
               hoverY: service.hoverY
               onActionInvoked: function(identifier) { service.invokeAction(model.key, identifier) }
