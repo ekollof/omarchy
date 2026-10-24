@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 
 // Layer-shell popup attached to a bar widget icon, designed for
 // click-driven AND keyboard-driven panels (e.g. SUPER+CTRL+W summon).
@@ -23,12 +24,12 @@ import qs.Commons
 // Missing on purpose (for now): triggerMode ("hover"), containsMouse.
 //
 // Positioning: full-screen layer-shell with the card placed inside at
-// `cardOrigin`. We use the bar window's height/width for the perpendicular
+// `cardOrigin`. We use the bar strip's thickness for the perpendicular
 // axis (away-from-bar) because mapToItem on the anchor returns
 // bar-content-relative coords with internal layout offsets baked in
 // (e.g. ~13px from the bar's vertical centering of its widget row). The
 // parallel axis (along-the-bar) uses the anchor's content x/y since the
-// bar spans full screen on that axis.
+// bar window spans the full screen on that axis.
 //
 // Outside-click dismissal: an overlay MouseArea catches clicks, with the
 // QsWindow.mask subtracting the bar strip so clicks on the bar still
@@ -52,7 +53,7 @@ PanelWindow {
   property int padding: Style.spacing.popupPadding
   property int contentWidth: Style.space(280)
   property int contentHeight: Style.space(200)
-  property var borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
+  property var borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
   property bool centerOnBar: false
   property bool open: false
   property int gap: Style.gapsOut  // distance between bar edge and panel
@@ -69,6 +70,28 @@ PanelWindow {
   property Item focusTarget: null
 
   default property alias contentItem: contentHolder.children
+
+  // Lazy content. A panel that sets `content` to a Component gets it built
+  // the first time the panel opens instead of at shell startup, which is
+  // where most of a bar's memory and load time went: every panel's tree was
+  // built on every monitor whether or not it was ever opened. The content
+  // stays loaded after that first open, so reopening is instant and any
+  // state the content holds (scroll position, an edit in progress) survives
+  // a close. Root-level panel code reaches into it through `loadedContent`,
+  // which is null until then, so anything that must run while the panel is
+  // closed (timers, data, IPC) belongs outside the content. Panels that
+  // declare children directly keep the old eager behaviour.
+  property Component content: null
+  property bool contentRequested: false
+  readonly property Item loadedContent: contentLoader.item
+  readonly property real loadedContentHeight: contentLoader.item ? contentLoader.item.implicitHeight : 0
+
+  // Build the content without opening the panel, for callers that need to
+  // reach it first.
+  function ensureContent() {
+    if (content) contentRequested = true
+    return contentLoader.item
+  }
 
   readonly property var coordinatorKey: owner || root
   readonly property var anchorWindow: anchorItem ? anchorItem.QsWindow.window : null
@@ -124,11 +147,7 @@ PanelWindow {
   // Clickable region is the whole screen. Clicks in the bar strip are
   // forwarded to registered bar buttons so switching between panel icons
   // works in one click even when the overlay surface is above the bar.
-  readonly property real _barStripSize: {
-    if (!bar) return 0
-    var actual = (root.barPos === "top" || root.barPos === "bottom") ? root.barH : root.barW
-    return Math.max(bar.barSize, actual) + root.gap
-  }
+  readonly property real _barStripSize: bar ? barThickness + gap : 0
   mask: Region {
     width: root.screenW
     height: root.screenH
@@ -148,7 +167,7 @@ PanelWindow {
   // full-width top bar, the content x maps directly to screen x; the y
   // returned here has the bar's internal padding baked in (e.g. ~13px
   // from vertical centering of the widget row), which is why `cardOrigin`
-  // below uses `barH` for the perpendicular axis instead of this y.
+  // below uses `barThickness` for the perpendicular axis instead of this y.
   readonly property point anchorScreenPos: {
     anchorWatcher.transform  // reactive dependency
     if (!anchorItem || !anchorWindow) return Qt.point(0, 0)
@@ -173,8 +192,8 @@ PanelWindow {
   // the output origin. A hidden bar reserves nothing, so an OSK alone insets
   // only the far edge.
   readonly property bool barReserved: insetOverlay && !(bar && bar.barHidden)
-  readonly property real originX: (barPos === "left" && barReserved) ? barW : 0
-  readonly property real originY: (barPos === "top" && barReserved) ? barH : 0
+  readonly property real originX: (barPos === "left" && barReserved) ? barThickness : 0
+  readonly property real originY: (barPos === "top" && barReserved) ? barThickness : 0
   // ExclusionMode.Auto with all four anchors sets exclusiveZone 0: the
   // compositor insets this overlay around the bar/OSK reserved bands.
   // Prefer the surface size once mapped so a tall panel cannot extend
@@ -184,13 +203,13 @@ PanelWindow {
     if (surface <= 0) return 0
     // An inset surface already excludes the bar band; a fullscreen window
     // still spans it, so keep the bar out of the card budget there.
-    var barReserve = (barPos === "left" || barPos === "right") && !root.insetOverlay ? barW + gap : 0
+    var barReserve = (barPos === "left" || barPos === "right") && !root.insetOverlay ? barThickness + gap : 0
     return Math.max(120, surface - barReserve - margin * 2)
   }
   readonly property real availableCardHeight: {
     var surface = root.insetOverlay ? height : screenH
     if (surface <= 0) return 0
-    var barReserve = (barPos === "top" || barPos === "bottom") && !root.insetOverlay ? barH + gap : 0
+    var barReserve = (barPos === "top" || barPos === "bottom") && !root.insetOverlay ? barThickness + gap : 0
     return Math.max(120, surface - barReserve - margin * 2)
   }
   readonly property real verticalContentInset: padding * 2 + Border.top(borderSpec) + Border.bottom(borderSpec)
@@ -216,16 +235,22 @@ PanelWindow {
   }
 
   // Desired top-left of the card in screen coordinates. For the
-  // perpendicular axis (away-from-bar) we anchor to the bar window's edge
+  // perpendicular axis (away-from-bar) we anchor to the bar strip's edge
   // directly — not the anchor item's y/x — because mapToItem(barContent)
   // returns coordinates in the bar's content space, which can be offset
-  // from the bar surface's screen-anchored corner by internal layout
-  // (centering wrappers, padding). The bar's surface IS aligned to its
-  // anchored screen edge, so using `barW`/`barH` gives the right edge
+  // from the strip's screen-anchored corner by internal layout (centering
+  // wrappers, padding). The bar window spans its whole screen, so its
+  // dimensions say nothing about the strip; the painted strip hugs the
+  // bar's anchored screen edge at the bar's thickness for this screen
+  // (notch floor included), so `barThickness` gives the strip's inner edge
   // regardless of how the bar's internal widgets are positioned. For the
   // parallel axis (along the bar) the anchor item's reported position is
   // still consistent with the bar content origin, so it's accurate for
   // centering the card under the icon.
+  readonly property real barThickness: !bar ? 0
+    : (typeof bar.barSizeFor === "function" && screen ? bar.barSizeFor(screen.name) : bar.barSize)
+  // Bar window dimensions, only for mapping overlay coordinates into
+  // bar-window content coordinates in barPoint() below.
   readonly property real barW: anchorWindow ? anchorWindow.width : screenW
   readonly property real barH: anchorWindow ? anchorWindow.height : 0
   readonly property point cardOrigin: {
@@ -233,22 +258,22 @@ PanelWindow {
     var x = 0, y = 0
     if (centerOnBar && (barPos === "top" || barPos === "bottom")) {
       x = screenW / 2 - contentWidth / 2
-      y = barPos === "bottom" ? screenH - barH - contentHeight - gap : barH + gap
+      y = barPos === "bottom" ? screenH - barThickness - contentHeight - gap : barThickness + gap
     } else if (centerOnBar) {
-      x = barPos === "left" ? barW + gap : screenW - barW - contentWidth - gap
+      x = barPos === "left" ? barThickness + gap : screenW - barThickness - contentWidth - gap
       y = screenH / 2 - contentHeight / 2
     } else if (barPos === "bottom") {
       x = anchorScreenPos.x + anchorW / 2 - contentWidth / 2
-      y = screenH - barH - contentHeight - gap
+      y = screenH - barThickness - contentHeight - gap
     } else if (barPos === "left") {
-      x = barW + gap
+      x = barThickness + gap
       y = anchorScreenPos.y + anchorH / 2 - contentHeight / 2
     } else if (barPos === "right") {
-      x = screenW - barW - contentWidth - gap
+      x = screenW - barThickness - contentWidth - gap
       y = anchorScreenPos.y + anchorH / 2 - contentHeight / 2
     } else { // "top" (default)
       x = anchorScreenPos.x + anchorW / 2 - contentWidth / 2
-      y = barH + gap
+      y = barThickness + gap
     }
     x = Math.max(margin, Math.min(x, screenW - contentWidth - margin))
     y = Math.max(margin, Math.min(y, screenH - contentHeight - margin))
@@ -271,6 +296,7 @@ PanelWindow {
   // animation, which made ownership transfer to a sibling popup race.
   onOpenChanged: {
     if (open) {
+      if (content) contentRequested = true
       focusPrimed = false
       beginFocusPrime()
       if (focusTarget) Qt.callLater(function() {
@@ -361,8 +387,7 @@ PanelWindow {
         var target = targets[i]
         if (!target || !target.triggerPress || target.visible === false || target.opacity === 0 || !target.mapToItem) continue
         if (root.bar.targetBelongsToWindow && !root.bar.targetBelongsToWindow(target, root.anchorWindow)) continue
-        var pos = root.anchorWindow.itemPosition(target)
-        if (p.x >= pos.x && p.x <= pos.x + target.width && p.y >= pos.y && p.y <= pos.y + target.height) return target
+        if (Util.itemContainsPoint(target, root.anchorWindow.contentItem, p.x, p.y)) return target
       }
       return null
     }
@@ -436,7 +461,7 @@ PanelWindow {
     y: root.cardOrigin.y
     width: root.contentWidth
     height: root.contentHeight
-    color: Color.popups.background
+    color: Commons.Color.popups.background
     borderSpec: root.borderSpec
     padding: root.padding
     radius: Style.cornerRadius
@@ -457,11 +482,23 @@ PanelWindow {
     Item {
       id: contentHolder
       anchors.fill: parent
+      // Right-to-left languages read the card mirrored; the card itself
+      // stays where the bar puts it.
+      LayoutMirroring.enabled: Commons.I18n.rightToLeft
+      LayoutMirroring.childrenInherit: true
       anchors.topMargin: card.contentTopInset
       anchors.rightMargin: card.contentRightInset
       anchors.bottomMargin: card.contentBottomInset
       anchors.leftMargin: card.contentLeftInset
       opacity: root.popoutSwitching ? (root.open ? 1.0 : 0) : 1.0
+
+      Loader {
+        id: contentLoader
+        anchors.fill: parent
+        focus: true
+        active: !!root.content && (root.open || root.contentRequested)
+        sourceComponent: root.content
+      }
 
       Behavior on opacity {
         enabled: root.popoutSwitching

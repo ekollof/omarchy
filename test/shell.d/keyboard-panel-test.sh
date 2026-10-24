@@ -46,4 +46,28 @@ assert(
   /insetOverlay: backingWindowVisible/.test(panelQml),
   'panel overlay measurements wait for the mapped surface instead of trusting pre-map geometry'
 )
+
+// Evaluate the production geometry against a full-screen bar window. Its
+// dimensions must not become the reserved strip size after upstream's drag fix.
+function expression(name) {
+  const found = panelQml.match(new RegExp('property real ' + name + ': ([^\\n]+)'))
+  assert(found, name + ' binding exists')
+  return new Function('barPos', 'barReserved', 'barThickness', 'barW', 'barH', 'return ' + found[1])
+}
+for (const edge of ['top', 'bottom', 'left', 'right']) {
+  assert(expression('originX')(edge, true, 34, 1920, 1080) === (edge === 'left' ? 34 : 0), 'horizontal inset uses the strip at ' + edge)
+  assert(expression('originY')(edge, true, 34, 1920, 1080) === (edge === 'top' ? 34 : 0), 'vertical inset uses the strip at ' + edge)
+  for (const inset of [false, true]) {
+    for (const axis of ['Width', 'Height']) {
+      const body = panelQml.match(new RegExp('property real availableCard' + axis + ': \\{([\\s\\S]*?)\\n  \\}'))
+      assert(body, axis + ' budget binding exists')
+      const run = new Function('root', 'width', 'height', 'screenW', 'screenH', 'barPos', 'barThickness', 'barW', 'barH', 'gap', 'margin', body[1])
+      const horizontal = edge === 'top' || edge === 'bottom'
+      const surface = axis === 'Width' ? (inset && !horizontal ? 1886 : 1920) : (inset ? (horizontal ? 746 : 780) : 1080)
+      const reserve = !inset && ((axis === 'Width') !== horizontal) ? 42 : 0
+      const actual = run({insetOverlay: inset}, !horizontal ? 1886 : 1920, horizontal ? 746 : 780, 1920, 1080, edge, 34, 1920, 1080, 8, 16)
+      assert(actual === surface - reserve - 32, axis + ' budget respects the actual overlay and strip at ' + edge)
+    }
+  }
+}
 JS
