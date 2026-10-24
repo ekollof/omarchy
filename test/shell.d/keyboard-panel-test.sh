@@ -49,6 +49,20 @@ assert(
 
 // Evaluate the production geometry against a full-screen bar window. Its
 // dimensions must not become the reserved strip size after upstream's drag fix.
+const originBody = panelQml.match(/property point cardOrigin: \{([\s\S]*?)\n  \}/)[1]
+const place = new Function('root', 'Qt', 'with (root) {' + originBody + '}')
+const geometry = {
+  anchorItem: {}, bar: {}, centerOnBar: false, barPos: 'right',
+  screenW: 1200, screenH: 1000, contentWidth: 300, contentHeight: 200,
+  drawnHeight: 400, barThickness: 34, gap: 8, margin: 16,
+  anchorScreenPos: {x: 1166, y: 950}, anchorW: 34, anchorH: 34,
+  originX: 0, originY: 0, insetOverlay: false, width: 1200, height: 700,
+}
+const qt = {point: (x, y) => ({x, y})}
+assert(place(geometry, qt).y === 584, 'fullscreen placement clamps the animated drawn height')
+geometry.insetOverlay = true
+assert(place(geometry, qt).y === 284, 'OSK-inset placement also clamps the animated drawn height')
+
 function expression(name) {
   const found = panelQml.match(new RegExp('property real ' + name + ': ([^\\n]+)'))
   assert(found, name + ' binding exists')
