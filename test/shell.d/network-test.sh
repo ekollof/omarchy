@@ -9,6 +9,24 @@ const fs = require('fs')
 const network = requireFromRoot('shell/plugins/panels/network/Model.js')
 const panelSource = fs.readFileSync(root + '/shell/plugins/panels/network/Panel.qml', 'utf8')
 
+// Execute the complete binding, including its continuation lines.
+const bandPill = panelSource.slice(panelSource.indexOf('component BandPill:'))
+const bandCursor = bandPill.match(/hasCursor: ([\s\S]*?)\n\s*onHasCursorChanged:/)
+assert(bandCursor, 'band pill has a complete cursor binding before its handler')
+const bandHasCursor = new Function('root', 'slot', 'return (' + bandCursor[1] + ')')
+for (const active of [false, true]) {
+  for (const section of ['band', 'dns']) {
+    for (const auto of [false, true]) {
+      for (let index = 0; index < 3; index++) {
+        const state = {cursorActive: active, focusSection: section, bandAutoFocused: auto, bandIndex: index}
+        const lit = [0, 1, 2].filter(slot => bandHasCursor(state, slot))
+        assertDeepEqual(lit, active && section === 'band' && !auto ? [index] : [],
+          'only the selected manual band has the keyboard cursor')
+      }
+    }
+  }
+}
+
 assert(/IpcHandler[\s\S]*?function toggleNetwork\(\) \{ root\.toggleNetwork\(\) \}/.test(panelSource), 'network exposes the Wi-Fi radio toggle over IPC')
 assert(/manageIpc: false/.test(panelSource), 'network owns its IPC handler so it can extend the target methods')
 
