@@ -6,6 +6,12 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
 windows_vm_command="$ROOT/bin/omarchy-windows-vm"
 
+# These source the helper's pure logic, not an x86 VM or the host user manager.
+# Export the stubs for the scheduling fixtures' child bash processes as well.
+omarchy-hw-x86() { return 0; }
+systemctl() { return 0; }
+export -f omarchy-hw-x86 systemctl
+
 # User-side source hardening must clear leftover directory setgid. GNU chmod
 # 0700 does not, so a pre-existing ~/Windows mode 2700/2777 used to survive
 # prepare_user_mount_sources and then fail the privileged exact-700 check.
