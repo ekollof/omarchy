@@ -51,6 +51,7 @@ end
 -- read. It still has to leave a rule behind, or the console would open unseeded.
 assert(#rules > 0, "console is ruled even before a monitor can be read")
 assert(#launches == 0, "loading the config does not launch an agent")
+handlers["workspace.created"](nil)
 handlers["workspace.created"]({ name = "1", is_empty = true })
 handlers["workspace.created"]({ name = "special:scratchpad", is_empty = true })
 handlers["workspace.created"]({ name = "special:qconsole", is_empty = false })

@@ -24,7 +24,7 @@ local CONSOLE = "special:qconsole"
 local seed = "[workspace " .. CONSOLE .. " silent] omarchy-agent"
 
 hl.on("workspace.created", function(workspace)
-  if workspace.name == CONSOLE and workspace.is_empty then
+  if workspace and workspace.name == CONSOLE and workspace.is_empty then
     hl.exec_cmd(seed)
   end
 end)
