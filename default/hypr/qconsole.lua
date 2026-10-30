@@ -23,6 +23,12 @@ local CONSOLE = "special:qconsole"
 -- empty console.
 local seed = "[workspace " .. CONSOLE .. " silent] omarchy-agent"
 
+hl.on("workspace.created", function(workspace)
+  if workspace.name == CONSOLE and workspace.is_empty then
+    hl.exec_cmd(seed)
+  end
+end)
+
 -- Dimming only applies while a special workspace is open, so the console gets
 -- its separation from the workspace underneath without costing anything the
 -- rest of the time.
@@ -56,8 +62,6 @@ local function cover(side, bottom)
     -- open, and the active border reads as a stray frame around a panel that
     -- is already set apart by the dimming behind it.
     no_border = true,
-
-    on_created_empty = seed,
   })
 
   return true
