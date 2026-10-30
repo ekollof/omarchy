@@ -265,6 +265,68 @@ EOF
   )
   pass "the share watcher leaves once the container is gone"
 
+  # Exercise the wizard itself: testing the validator alone missed its separate
+  # case-sensitive suffix comparison. Cancel at the password prompt, before any
+  # compose write, container launch, or service scheduling can happen.
+  (
+    test_home=$(mktemp -d)
+    trap 'rm -rf "$test_home"' EXIT
+    export HOME=$test_home OMARCHY_WINDOWS_DIR=$test_home/runtime
+    set -- help
+    source "$windows_vm_command" >/dev/null
+    prepare_user_mount_sources() { :; }
+    check_prerequisites() { :; }
+    omarchy-pkg-add() { :; }
+    omarchy-i18n() { echo "$1"; }
+    available_storage_gb() { echo 100; }
+    gum() {
+      case "$*" in
+      *windowsVm.ramHeader*) echo 4G ;;
+      *windowsVm.coresHeader*) echo 2 ;;
+      *windowsVm.diskHeader*) echo 64G ;;
+      'confirm Join a Windows domain?') return 0 ;;
+      *'Enter the Active Directory domain'*) echo "$test_domain" ;;
+      *'Organizational unit'*) : ;;
+      *'Domain account used to join the domain:'*)
+        echo prompt >>"$test_home/prompts"
+        if [[ $(wc -l <"$test_home/prompts") == 1 ]]; then
+          echo "$test_account"
+        elif [[ $test_account == 'admin@other.example.com' ]]; then
+          echo admin@corp.example.com
+        fi
+        ;;
+      *'Password for the join account:'*) touch "$test_home/password-reached" ;;
+      *) echo "$*" >>"$test_home/unexpected"; return 97 ;;
+      esac
+    }
+    # Reject any accidental escape to host-mutating operations, even in children.
+    docker() { touch "$test_home/unexpected"; return 97; }
+    systemctl() { docker; }
+    systemd-run() { docker; }
+    sudo() { docker; }
+    pkexec() { docker; }
+    export test_home
+    export -f docker systemctl systemd-run sudo pkexec
+    for test_account in admin@CORP.EXAMPLE.COM admin@corp.example.com admin@other.example.com; do
+      test_domain=corp.example.com
+      expected_prompts=1
+      if [[ $test_account == 'admin@corp.example.com' ]]; then
+        test_domain=CORP.EXAMPLE.COM
+      elif [[ $test_account == 'admin@other.example.com' ]]; then
+        expected_prompts=2
+      fi
+      rm -f "$test_home/prompts" "$test_home/password-reached"
+      wizard_rc=0
+      ( install_windows ) >"$test_home/wizard.log" 2>&1 || wizard_rc=$?
+      [[ $wizard_rc == 1 && -e $test_home/password-reached ]] ||
+        fail "wizard rejected matching UPN or failed before password: $test_account / $test_domain" "$(cat "$test_home/wizard.log")"
+      [[ $(wc -l <"$test_home/prompts") == "$expected_prompts" ]] ||
+        fail "wizard did not distinguish DNS case from a different domain"
+      [[ ! -e $test_home/unexpected ]] || fail "wizard fixture escaped its expected prompts or isolation"
+    done
+  )
+  pass "domain wizard accepts matching UPN suffixes in either case and retries a different domain"
+
   # Domain logon identity. The join-account check compares the UPN suffix
   # against DOMAIN case-insensitively (DNS names are), and the launcher
   # derives its transport/Kerberos domain from a stored DOMAIN, the readable

@@ -1698,7 +1698,7 @@ EOF
     fi
     while ! valid_join_account "$USERNAME" ||
       [[ $USERNAME == "docker" ]] ||
-      [[ $USERNAME == *@* && ${USERNAME#*@} != "${DOMAIN,,}" ]]; do
+      { [[ $USERNAME == *@* ]] && ! domain_suffix_matches "${USERNAME#*@}" "$DOMAIN"; }; do
       echo "Invalid join account (bare name or user@$DOMAIN, not the default)"
       USERNAME=$(gum input --placeholder="admin@$DOMAIN" --header="Domain account used to join the domain:")
       if [[ -z $USERNAME ]]; then
