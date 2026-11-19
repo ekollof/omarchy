@@ -190,6 +190,8 @@ When the `left`/`right` (top/bottom) sections no longer fit beside the centered 
 user `shell.json` exists, defaults are used verbatim. Once the user
 customizes, `shell.json` is canonical — there is no deep-merge.
 
+Shell-side saves are disabled until the initial user-config read completes. A missing file may be initialized from defaults; an existing empty, invalid, or unreadable file is displayed using defaults but is not overwritten by shell-side settings saves. Repair the file and reload it to restore saving. This guard does not serialize concurrent external writers.
+
 `shell.json` is shell configuration; theme tokens live in `shell.toml`
 (next section). Both are current — they answer different questions. A
 machine-level `~/.config/omarchy/shell.toml` is watched live by the
