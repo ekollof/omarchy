@@ -12,7 +12,10 @@ unset GOROOT GOBIN
 if pacman -Qem >/dev/null; then
   if omarchy-pkg-aur-accessible; then
     echo -e "\e[32m\n$(omarchy-i18n update.aur)\e[0m"
-    yay -Sua --noconfirm --cleanafter --ignore gcc14,gcc14-libs || exit 1
+    # carapace-bin 1.8.4's release archive names its data file "." instead of
+    # carapace.db.gz, so makepkg cannot extract it. Hold the package until
+    # upstream republishes a usable release, then drop it from --ignore.
+    yay -Sua --noconfirm --cleanafter --ignore gcc14,gcc14-libs,carapace-bin || exit 1
     echo
   else
     echo -e "\e[31m\n$(omarchy-i18n update.aurUnavailable)\e[0m"
